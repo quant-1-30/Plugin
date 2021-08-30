@@ -1,0 +1,29 @@
+2021-08-20 21:02:10 [scrapy.middleware] INFO: Enabled extensions:
+['scrapy.extensions.corestats.CoreStats',
+ 'scrapy.extensions.memusage.MemoryUsage',
+ 'scrapy.extensions.logstats.LogStats',
+ 'scrapy.extensions.throttle.AutoThrottle',
+ 'tutorial.extensions.StatsMailer',
+ 'tutorial.extensions.CoreStats']
+2021-08-20 21:02:10 [scrapy.middleware] INFO: Enabled downloader middlewares:
+['scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware',
+ 'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware',
+ 'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware',
+ 'tutorial.middlewares.UserAgentMiddleware',
+ 'tutorial.middlewares.RetryMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware',
+ 'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware',
+ 'scrapy.downloadermiddlewares.stats.DownloaderStats']
+2021-08-20 21:02:10 [scrapy.middleware] INFO: Enabled spider middlewares:
+['tutorial.middlewares.ErrorSpiderMiddleware',
+ 'scrapy.spidermiddlewares.offsite.OffsiteMiddleware',
+ 'scrapy.spidermiddlewares.referer.RefererMiddleware',
+ 'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware',
+ 'scrapy.spidermiddlewares.depth.DepthMiddleware']
+2021-08-20 21:02:11 [scrapy.middleware] INFO: Enabled item pipelines:
+['tutorial.pipelines.BasicsPipeline',
+ 'tutorial.pipelines.AlignPipeline',
+ 'tutorial.pipelines.DbPipeline']
+2021-08-20 21:02:11 [scrapy.core.engine] INFO: Spider opened
+2021-08-20 21:02:11 [scrapy.extensions.logstats] INFO: Crawled 0 pages (at 0 pages/min), scraped 0 items (at 0 items/min)
+2021-08-20 21:02:11 [scrapy.core.engine] DEBUG: Crawled (200) <GET http://push2.eastmoney.com/api/qt/clist/get?fs=m%3A0%2Bt%3A6%2Cm%3A0%2Bt%3A80%2Cm%3A1%2Bt%3A2%2Cm%3A1%2Bt%3A23&fields=f12%2Cf14&pn=1&pz=50000> (referer: None)
