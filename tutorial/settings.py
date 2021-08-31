@@ -33,8 +33,8 @@ MYSQL = {
 
 BOT_NAME = 'ArkQuant'
 
-SPIDER_MODULES = ['test.spiders']
-NEWSPIDER_MODULE = 'test.spiders'
+SPIDER_MODULES = ['tutorial.spiders']
+NEWSPIDER_MODULE = 'tutorial.spiders'
 
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
@@ -99,8 +99,8 @@ RETRY_HTTP_CODES = [408, 429, 456, 500, 502, 503, 504, 522, 524]
 DOWNLOADER_MIDDLEWARES = {
     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
     'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,
-    'test.middlewares.UserAgentMiddleware': 500,
-    'test.middlewares.RetryMiddleware': 550,
+    'tutorial.middlewares.UserAgentMiddleware': 500,
+    'tutorial.middlewares.RetryMiddleware': 550,
     # 'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': None,
     # 'test.middlewares.RedirectMiddleware': 600,
 }
@@ -134,7 +134,7 @@ HTTPERROR_ALLOWED_CODES = [301, 302]
 
 SPIDER_MIDDLEWARES = {
    'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': None,
-   'test.middlewares.ErrorSpiderMiddleware': 50,
+   'tutorial.middlewares.ErrorSpiderMiddleware': 50,
 }
 
 # SPIDER_MIDDLEWARES_BASE = {
@@ -150,8 +150,8 @@ SPIDER_MIDDLEWARES = {
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
 
 EXTENSIONS = {
-   'test.extensions.StatsMailer': 0,
-   'test.extensions.CoreStats': 0,
+   'tutorial.extensions.StatsMailer': 0,
+   'tutorial.extensions.CoreStats': 0,
 }
 
 
@@ -170,9 +170,9 @@ EXTENSIONS = {
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
-    'test.pipelines.BasicsPipeline': 300,
-    'test.pipelines.AlignPipeline': 400,
-    'test.pipelines.DbPipeline': 500,
+    'tutorial.pipelines.BasicsPipeline': 300,
+    'tutorial.pipelines.AlignPipeline': 400,
+    'tutorial.pipelines.DbPipeline': 500,
 }
 
 # Enable and configure the AutoThrottle extension (disabled by default)

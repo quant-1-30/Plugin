@@ -11,7 +11,7 @@ from scrapy.spiders import CrawlSpider
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
 from itemloaders.processors import MapCompose
-from test.items import BasicsItem, Dividends, Rigths, Ownership
+from tutorial.items import BasicsItem, Dividends, Rigths, Ownership
 
 
 class Basics(CrawlSpider):

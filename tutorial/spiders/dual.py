@@ -9,8 +9,8 @@ import scrapy, json
 from scrapy.loader import ItemLoader
 from urllib.parse import urlencode, quote
 # from . import Routers, parse_kline, params_dual
-from test.items import DualItem
-from test.utils import params2url, parse_kline
+from tutorial.items import DualItem
+from tutorial.utils import params2url, parse_kline
 
 
 class Dual(scrapy.Spider):

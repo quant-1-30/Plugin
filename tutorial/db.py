@@ -26,10 +26,10 @@ def init_engine():
                         max_overflow=MYSQL['max_overflow'])
     create_str = "CREATE DATABASE IF NOT EXISTS %s ;" % MYSQL['db']
     eng.execute(create_str)
-    # engine.execute("use %s" % params['db'])
-    engine_path = 'mysql+pymysql://{username}:{password}@{host}:{port}/{db}'.format(**MYSQL)
-    eng = create_engine(engine_path, pool_size=MYSQL['pool_size'],
-                        max_overflow=MYSQL['max_overflow'])
+    eng.execute("use %s" % MYSQL['db'])
+    # engine_path = 'mysql+pymysql://{username}:{password}@{host}:{port}/{db}'.format(**MYSQL)
+    # eng = create_engine(engine_path, pool_size=MYSQL['pool_size'],
+    #                     max_overflow=MYSQL['max_overflow'])
     return eng
 
 

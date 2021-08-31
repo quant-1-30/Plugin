@@ -9,8 +9,8 @@ import scrapy, json
 from scrapy.spiders import CrawlSpider
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
-from test.utils import params2url, parse_kline
-from test.items import AssetItem
+from tutorial.utils import params2url, parse_kline
+from tutorial.items import AssetItem
 
 
 class Stock(CrawlSpider):

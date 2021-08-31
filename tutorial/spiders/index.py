@@ -9,8 +9,8 @@ import scrapy, json
 from scrapy.loader import ItemLoader
 from urllib.parse import urlencode, quote
 # from . import Routers, params_url, parse_kline
-from test.items import AssetItem
-from test.utils import params2url, parse_kline
+from tutorial.items import AssetItem
+from tutorial.utils import params2url, parse_kline
 
 
 class Index(scrapy.Spider):

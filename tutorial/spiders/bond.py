@@ -8,8 +8,8 @@ Created on Tue Mar 12 15:37:47 2019
 import scrapy, json
 from scrapy.loader import ItemLoader
 from urllib.parse import urlencode, quote
-from test.items import BondItem
-from test.utils import params2url, parse_kline
+from tutorial.items import BondItem
+from tutorial.utils import params2url, parse_kline
 # from . import Routers, params_url, parse_kline
 
 
