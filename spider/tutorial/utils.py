@@ -54,3 +54,11 @@ def parse_kline(response, **kwargs):
             kline.add_value('sid', sid)
         kline.add_value('owner', owner)
     yield kline.load_item()
+
+
+def coerce_to_uint32(a, scaling_factor):
+    """
+    Returns a copy of the array as uint32, applying a scaling factor to
+    maintain precision if supplied.
+    """
+    return (a * scaling_factor).round().astype('uint32')

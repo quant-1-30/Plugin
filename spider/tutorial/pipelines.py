@@ -20,6 +20,8 @@ from toolz import valmap
 from functools import partial
 from scrapy import signals
 
+from tutorial.utils import coerce_to_uint32
+
 
 class Pipeline:
     """
@@ -37,6 +39,7 @@ class Pipeline:
         # Initialize resources or connections
         pass
 
+    # core method
     def process_item(self, item, spider):
         pass
 
@@ -76,15 +79,39 @@ class Adjustment(Pipeline):
         return item
 
 
+# from twisted.enterprise import adbapi
+# from pymysql import cursors
+# from sqlalchemy.dialects.mysql import insert
+#
+#
+# class Writer(Pipeline):
+#     """
+#         enroll into mysql according to owner sid item
+#     """
+#     def __init__(self, db_pool):
+#         self.db_pool = db_pool
+#
+#     @classmethod
+#     def from_crawler(cls, crawler):
+#         settings = crawler.settings.get('MYSQL')
+#         db_params = dict(
+#             host=settings['host'],
+#             user=settings['username'],
+#             password=settings['password'],
+#             port=settings['port'],
+#             db=settings['db'],
+#             use_unicode=True,
+#             cursorclass=cursors.Cursor
+#         )
+#         db_pool = adbapi.ConnectionPool('pymysql', **db_params)
+#         return cls(db_pool)
 
-
-
-def coerce_to_uint32(a, scaling_factor):
-    """
-    Returns a copy of the array as uint32, applying a scaling factor to
-    maintain precision if supplied.
-    """
-    return (a * scaling_factor).round().astype('uint32')
+#     def insert_item(self, cursor, item):
+#         # on_duplicate_key_update to update instead of insert when duplicate key error
+#         pass
+#
+#     def process_item(self, item, spider):
+#         query = self.db_pool.runInteraction(self.insert_item, item)
 
 
 class HDF5Writer(Pipeline):
@@ -118,12 +145,6 @@ class HDF5Writer(Pipeline):
     VOLUME = 'volume'
 
     FIELDS = (OPEN, HIGH, LOW, CLOSE, VOLUME)
-
-    # DAY = 'day'
-    # SID = 'sid'
-
-    # START_DATE = 'start_date'
-    # END_DATE = 'end_date'
 
     DEFAULT_SCALING_FACTORS = {
         # Retain 3 decimal places for prices.
@@ -167,20 +188,6 @@ class HDF5Writer(Pipeline):
         if scaling_factors is None:
             scaling_factors = self.DEFAULT_SCALING_FACTORS
 
-        # Note that this functions validates that all of the frames
-        # share the same days and sids.
-        # days, sids = days_and_sids_for_frames(list(frames.values()))
-
-
-        # # Write start and end dates for each sid.
-        # start_date_ixs, end_date_ixs = compute_asset_lifetimes(frames)
-
-        # if len(sids):
-        #     chunks = (len(sids), min(self._date_chunk_size, len(days)))
-        # else:
-        #     # h5py crashes if we provide chunks for empty data.
-        #     chunks = None
-
         with self.h5_file(mode='a') as h5_file:
             # ensure that the file version has been written
             h5_file.attrs['version'] = self.VERSION
@@ -188,15 +195,6 @@ class HDF5Writer(Pipeline):
             # self._write_index_group(country_group, days, sids)
             field_group = h5_file.create_group(field)
             # sub_group
-            
-            # self._write_index_group(field_group, days, sids)
-
-            # self._write_lifetimes_group(
-            #     field_group,
-            #     start_date_ixs,
-            #     end_date_ixs,
-            # )
-            
             self._write_data_group(
                 field_group,
                 frames,
@@ -262,30 +260,6 @@ class HDF5Writer(Pipeline):
             scaling_factors=scaling_factors,
         )
 
-    # def _write_index_group(self, days, sids):
-    #     """Write /country/index.
-    #     """
-    #     index_group = country_group.create_group(INDEX)
-    #     self._log_writing_dataset(index_group)
-
-    #     index_group.create_dataset(SID, data=sids)
-
-    #     # h5py does not support datetimes, so they need to be stored
-    #     # as integers.
-    #     index_group.create_dataset(DAY, data=days.astype(np.int64))
-
-    # def _write_lifetimes_group(self,
-    #                            country_group,
-    #                            start_date_ixs,
-    #                            end_date_ixs):
-    #     """Write /country/lifetimes
-    #     """
-    #     lifetimes_group = country_group.create_group(LIFETIMES)
-    #     self._log_writing_dataset(lifetimes_group)
-
-    #     lifetimes_group.create_dataset(START_DATE, data=start_date_ixs)
-    #     lifetimes_group.create_dataset(END_DATE, data=end_date_ixs)
-
     def _write_data_group(self,
                           field_group,
                           frames,
@@ -319,77 +293,3 @@ class HDF5Writer(Pipeline):
     def process_item(self, item, spider):
         owner = item['owner'][0]
         self.write(owner,item)
-
-
-# def init_engine():
-#     # 在这里导入定义模型所需要的所有模块，这样它们就会正确的注册在
-#     # 元数据上。否则你就必须在调用 init_db() 之前导入它们, import --- 执行脚本
-#     # scoped_session 线程安全
-#     # from sqlalchemy.orm import sessionmaker, scoped_session
-#     # db_session = scoped_session(sessionmaker(autocommit=False,
-#     #                                          autoflush=False,
-#     #                                          bind=engine))
-#     # from sqlalchemy.ext.declarative import declarative_base
-#     # Base = declarative_base()
-#     # Base.query = db_session.query_property()
-#     # Base.metadata.create_all(bind=engine)
-#     engine_path = 'mysql+pymysql://{username}:{password}@{host}:{port}'.format(**MYSQL)
-#     eng = create_engine(engine_path, pool_size=MYSQL['pool_size'],
-#                         max_overflow=MYSQL['max_overflow'])
-#     create_str = "CREATE DATABASE IF NOT EXISTS %s ;" % MYSQL['db']
-#     eng.execute(create_str)
-#     eng.execute("use %s" % MYSQL['db'])
-#     # engine_path = 'mysql+pymysql://{username}:{password}@{host}:{port}/{db}'.format(**MYSQL)
-#     # eng = create_engine(engine_path, pool_size=MYSQL['pool_size'],
-#     #                     max_overflow=MYSQL['max_overflow'])
-#     return eng
-
-
-# from twisted.enterprise import adbapi
-# from pymysql import cursors
-# from sqlalchemy.dialects.mysql import insert
-#
-#
-# class Writer(Pipeline):
-#     """
-#         enroll into mysql according to owner sid item
-#     """
-#     def __init__(self, db_pool):
-#         self.db_pool = db_pool
-#
-#     @classmethod
-#     def from_crawler(cls, crawler):
-#         settings = crawler.settings.get('MYSQL')
-#         db_params = dict(
-#             host=settings['host'],
-#             user=settings['username'],
-#             password=settings['password'],
-#             port=settings['port'],
-#             db=settings['db'],
-#             use_unicode=True,
-#             cursorclass=cursors.Cursor
-#         )
-#         db_pool = adbapi.ConnectionPool('pymysql', **db_params)
-#         return cls(db_pool)
-#
-#     def process_item(self, item, spider):
-#         query = self.db_pool.runInteraction(self.insert_item, item)
-#
-#     def insert_item(self, cursor, item):
-#         if item:
-#             tbl = item.pop('table')[0]
-#             frame = pd.DataFrame(item)
-#             if tbl == 'ownership':
-#                 frame.drop_duplicates(inplace=True, keep='first')
-#                 frame = frame.iloc[1:, :]
-#             # enroll into database
-#             params = tuple(frame.T.to_dict().values())
-#             table = metadata.tables[tbl]
-#             print('params', params)
-#             for p in params:
-#                 cursor.execute(str(table.insert()), p)
-#                 # insert_stmt = insert(table).values(**p)
-#                 # on_duplicate_key_stmt = insert_stmt.on_duplicate_key_update(**p)
-#                 # print('sql', str(on_duplicate_key_stmt))
-#                 # cursor.execute(str(on_duplicate_key_stmt))
-

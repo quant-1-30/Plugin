@@ -9,10 +9,11 @@ import os
 import numpy as np
 import scrapy
 import json
-from scrapy import  Selector
 from urllib.parse import urlencode, quote
-from itemloaders.processors import TakeFirst, MapCompose, Join
+from scrapy import  Selector
 from scrapy.loader import ItemLoader
+# from itemadapter import is_item, ItemAdapter
+from itemloaders.processors import TakeFirst, MapCompose, Join
 
 from spider.tutorial.items import *
 from spider.tutorial.spiders.base import BaseSpider
@@ -24,6 +25,7 @@ class Adjustment(BaseSpider):
     allowed_domains = ['push2.eastmoney.com', 'finance.sina.com.cn', 'push2his.eastmoney.com']
     handle_httpstatus_list = [301, 302]
     
+    # override settings
     custom_settings = {
         "AUTOTHROTTLE_ENABLED": True,
         "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
