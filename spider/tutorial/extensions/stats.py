@@ -6,9 +6,8 @@ Created on Tue Mar 12 15:37:47 2019
 @author: python
 """
 
-# extensions
 import logging
-from datetime import datetime
+import datetime
 from scrapy import signals
 from scrapy.mail import MailSender
 from scrapy.exceptions import NotConfigured
@@ -33,11 +32,11 @@ class CoreStats:
         return o
 
     def spider_opened(self, spider):
-        self.start_time = datetime.utcnow()
+        self.start_time = datetime.datetime.now()
         self.stats.set_value('start_time', self.start_time, spider=spider)
 
     def spider_closed(self, spider, reason):
-        finish_time = datetime.utcnow()
+        finish_time = datetime.datetime.now()
         elapsed_time = finish_time - self.start_time
         elapsed_time_seconds = elapsed_time.total_seconds()
         self.stats.set_value('elapsed_time_seconds', elapsed_time_seconds, spider=spider)

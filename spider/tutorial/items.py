@@ -17,20 +17,19 @@ Created on Tue Mar 12 15:37:47 2019
 from scrapy.item import Item, Field
 
 
-# stock and etf assets
 class AssetItem(Item):
-    # 所属类别
-    owner = Field()
+
     # 代码
     sid = Field()
     # 中文
     name = Field()
+    # ipo_date
+    first_trading = Field()
 
 
 # 可转债信息
 class BondItem(Item):
-    # 所属类别
-    owner = Field()
+
     # 债券代码
     sid = Field()
     # 中文
@@ -45,10 +44,20 @@ class BondItem(Item):
     swap_edate = Field()
 
 
+# dual
+class DualItem(Item):
+
+    # sid
+    sid = Field()
+    # name
+    name = Field()
+    # hk code
+    dual = Field()
+
+
+
 class BasicsItem(Item):
 
-    # 所属类别
-    owner = Field()
     # 代码
     sid = Field()
     # 公司名称
@@ -65,10 +74,8 @@ class BasicsItem(Item):
     district_code = Field()
 
 
-class Dividends(Item):
+class Dividend(Item):
 
-    # 所属类别
-    owner = Field()
     # 代码
     sid = Field()
     # 公告日期
@@ -91,19 +98,17 @@ class Dividends(Item):
     progress = Field()
 
 
-class Rigths(Item):
+class Right(Item):
 
-    # 所属类别
-    owner = Field()
     # 代码
     sid = Field()
     # 公告日期
     declare_date = Field()
     # 除权日
-    ex_date = Field()
-    # 股权登记日
     register_date = Field()
     # 配股上市日
+    ex_date = Field()
+    # 股权登记日
     market_date = Field()
     # 配股方案
     bonus = Field()
@@ -111,13 +116,11 @@ class Rigths(Item):
     price = Field()
     # 基准股本(股)
     base = Field()
-
+    
 
 # 股权结构
 class Ownership(Item):
 
-    # 所属类别
-    owner = Field()
     # 代码
     sid = Field()
     # 变动日期
@@ -130,23 +133,9 @@ class Ownership(Item):
     strict = Field()
 
 
-# dual
-class DualItem(Item):
-    # 所属类别
-    owner = Field()
-    # sid
-    sid = Field()
-    # name
-    name = Field()
-    # hk code
-    dual = Field()
-
-
 # kline
 class KlineItem(Item):
 
-    # 所属类别
-    owner = Field()
     # 代码
     sid = Field()
     # 交易日

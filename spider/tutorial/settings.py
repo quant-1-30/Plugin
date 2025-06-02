@@ -16,6 +16,8 @@ import datetime
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+# 添加异步支持
+TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
 
 BOT_NAME = 'backtest'
 
@@ -33,7 +35,8 @@ ROBOTSTXT_OBEY = False
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
 # See also autothrottle settings and docs
-# DOWNLOAD_DELAY = 3
+DOWNLOAD_DELAY = 0.5
+RANDOMIZE_DOWNLOAD_DELAY = True
 
 
 # Disable cookies (enabled by default)
@@ -67,10 +70,8 @@ REDIRECT_ENABLED = False
 REDIRECT_MAX_TIMES = 1
 
 # default 180
-DOWNLOAD_TIMEOUT = 1
-# 0.5 * DOWNLOAD_DELAY and 1.5 * DOWNLOAD_DELAY
-DOWNLOAD_DELAY = 1
-RANDOMIZE_DOWNLOAD_DELAY = True
+DOWNLOAD_TIMEOUT = 30
+
 # stats
 DOWNLOADER_STATS = True
 
@@ -85,10 +86,9 @@ RETRY_HTTP_CODES = [408, 429, 456, 500, 502, 503, 504, 522, 524]
 DOWNLOADER_MIDDLEWARES = {
     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
     'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,
-    'tutorial.middlewares.UserAgentMiddleware': 500,
-    'tutorial.middlewares.RetryMiddleware': 550,
-    # 'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': None,
-    # 'test.middlewares.RedirectMiddleware': 600,
+    'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': None,
+    'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': None,
+    'scrapy.downloadermiddlewares.stats.DownloaderStats': None,
 }
 
 
@@ -100,10 +100,13 @@ HTTPERROR_ALLOW_ALL = False
 HTTPERROR_ALLOWED_CODES = [301, 302]
 
 # Enable or disable spider middlewares
-
 SPIDER_MIDDLEWARES = {
-   'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': None,
-   'tutorial.middlewares.ErrorSpiderMiddleware': 50,
+    'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': None,
+    'scrapy.spidermiddlewares.offsite.OffsiteMiddleware': None,
+    'scrapy.spidermiddlewares.referer.RefererMiddleware': None,
+    'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware': None,
+    'scrapy.spidermiddlewares.depth.DepthMiddleware': None,
+    'tutorial.middlewares.ErrorSpiderMiddleware': 50,
 }
 
 # SPIDER_MIDDLEWARES_BASE = {
@@ -137,7 +140,8 @@ SPIDER_MIDDLEWARES = {
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
 
 EXTENSIONS = {
-   'tutorial.extensions.StatsMailer': 0,
+   'scrapy.extensions.logstats.LogStats': None,
+   'tutorial.extensions.StatsMailer': None,
    'tutorial.extensions.CoreStats': 0,
 }
 
@@ -153,14 +157,17 @@ EXTENSIONS = {
 #     'scrapy.extensions.throttle.AutoThrottle': 0,
 # }
 
-
 # Configure item pipelines
-# See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-# ITEM_PIPELINES = {
-#     'tutorial.pipelines.BasicsPipeline': 300,
-#     'tutorial.pipelines.AlignPipeline': 400,
-#     'tutorial.pipelines.DbPipeline': 500,
-# }
+# https://docs.scrapy.org/en/latest/topics/item-pipeline.html
+ITEM_PIPELINES = {
+   #  'tutorial.pipelines.BasicsPipeline': 300,
+   #  'tutorial.pipelines.AlignPipeline': 400,
+    'tutorial.pipelines.AsyncDb': 500,
+}
+
+# AsyncDb
+POSTGRES_BATCH_SIZE = 100
+POSTGRES_RETRY = 3
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
@@ -175,12 +182,12 @@ AUTOTHROTTLE_TARGET_CONCURRENCY = 3.0
 # Enable showing throttling stats for every response received:
 AUTOTHROTTLE_DEBUG = False
 
-# Configure maximum concurrent requests performed by Scrapy (default: 16) fixed reverse to autothrottle
-# CONCURRENT_REQUESTS = 32
+# Configure maximum concurrent requests performed by Scrapy (default: 16)
+CONCURRENT_REQUESTS = 32
 # The download delay setting will honor only one of:
-# CONCURRENT_REQUESTS_PER_DOMAIN = 8
+CONCURRENT_REQUESTS_PER_DOMAIN = 16
 # None zero CONCURRENT_REQUESTS_PER_DOMAIN is ignored
-# CONCURRENT_REQUESTS_PER_IP = 8
+CONCURRENT_REQUESTS_PER_IP = 16
 
 # Enable and configure HTTP caching (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
@@ -211,13 +218,13 @@ META_URLS = {
            'aspects': 'http://finance.sina.com.cn/realstock/company/%s/nc.shtml',
            'bond': 'http://dcfm.eastmoney.com/em_mutisvcexpandinterface/api/js/get?',
            'kline': 'http://push2his.eastmoney.com/api/qt/stock/kline/get?',
-            }
+           'rightment': "https://datacenter-web.eastmoney.com/api/data/v1/get?sortTypes=-1&pageSize=50&pageNumber=1&reportName=RPT_IPO_ALLOTMENT&columns=ALL",
+           }
 
 # # kline
 Params = {'fields1': 'f1\x2Cf2\x2Cf3\x2Cf4\x2Cf5\x2Cf6',
           'fields2': 'f51\x2Cf52\x2Cf53\x2Cf54\x2Cf55\x2Cf56\x2Cf57\x2Cf58\x2Cf59\x2Cf60\x2Cf61',
           'klt': 101,
           'fqt': 0,
-        #   'start': int(datetime.datetime.now().strftime('%Y%m%d')),
           'start': 20040101,
           'end': 20500101}

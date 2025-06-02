@@ -11,14 +11,14 @@ import json
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
 
-from tutorial.items import Dividend
+from tutorial.items import Right
 from tutorial.base import BaseSpider
 
 
-class Adjustment(BaseSpider):
+class Rightment(BaseSpider):
 
-    name = 'adjustment'
-    table_name = "adjustment"
+    name = 'rightment'
+    table_name = "rightment"
     allowed_domains = ['push2.eastmoney.com', 'finance.sina.com.cn', 'push2his.eastmoney.com']
     handle_httpstatus_list = [301, 302]
 
@@ -38,6 +38,7 @@ class Adjustment(BaseSpider):
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed
         "ITEM_PIPELINES": {
+            'spider.tutorial.pipelines.Rightment': 400,
             'tutorial.pipelines.AsyncDb': 500,
         },
         "FEEDS": {
@@ -49,7 +50,8 @@ class Adjustment(BaseSpider):
         },
     }
 
-    def start_requests(self): 
+    # def start_requests(self):  $ deprecated in future version
+    async def start(self):
         params = {'pageSize': 100,
                   'pageNumber': 1,
                   'reportName': 'RPT_IPO_ALLOTMENT',
@@ -69,19 +71,19 @@ class Adjustment(BaseSpider):
             return
 
         # set loader
-        adjustment = ItemLoader(item=Dividend())
+        rightment = ItemLoader(item=Right())
    
         for obj in datas:
             # 2023-11-27 00:00:00
-            adjustment.add_value('sid', obj['SECUCODE'])
-            adjustment.add_value('name', obj['SECURITY_NAME_ABBR'])
-            adjustment.add_value('declare_date', obj['FIRST_NOTICE_DATE'])
-            adjustment.add_value('register_date', obj['EQUITY_RECORD_DATE'])
-            adjustment.add_value('ex_date', obj['EX_DIVIDEND_DATE'])
-            adjustment.add_value('market_date', obj['LISTING_DATE'])
-            adjustment.add_value('bonus', obj['PLACING_RATIO'])
-            adjustment.add_value('price', obj['ISSUE_PRICE'])
-        items = adjustment.load_item()
+            rightment.add_value('sid', obj['SECUCODE'])
+            rightment.add_value('name', obj['SECURITY_NAME_ABBR'])
+            rightment.add_value('declare_date', obj['FIRST_NOTICE_DATE'])
+            rightment.add_value('register_date', obj['EQUITY_RECORD_DATE'])
+            rightment.add_value('ex_date', obj['EX_DIVIDEND_DATE'])
+            rightment.add_value('market_date', obj['LISTING_DATE'])
+            rightment.add_value('bonus', obj['PLACING_RATIO'])
+            rightment.add_value('price', obj['ISSUE_PRICE'])
+        items = rightment.load_item()
         yield items
         
         # next page

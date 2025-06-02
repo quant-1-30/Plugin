@@ -2,7 +2,7 @@ a.获取全部的资产标的 --- equity convertible etf
 b.筛选出需要更新的标的（与缓存进行比较）
 # 字段非string一定要单独进行格式处理
 asset status 由于吸收合并代码可能会消失但是主体继续上市存在 e.g. T00018
-对于暂停上市 delist_date 为None(作为一种长期停盘的情况来考虑，由于我们不能存在后视误差不清楚是否能重新上市）
+对于暂停上市 delist_date 为None 作为一种长期停盘的情况来考虑，由于我们不能存在后视误差不清楚是否能重新上市）
 基于算法发出信号操作暂时上市的标的, 为了避免前视误差，过滤筛选距离已经退市标的而不是暂停上市  e.g. 5个交易日的股票
 对于暂停上市的股票可能还存在重新上市的可能性也可能存在退市的可能性 --- None ,状态不断的更新
 sr=-1 --- 表示倒序 sr=1 --- 顺序 或者 sortRule format {} 过滤
@@ -107,3 +107,6 @@ smtptls (bool) – enforce using SMTP STARTTLS
 
 smtpssl (bool) – enforce using a secure SSL connection
 
+# asset / rightment / adjustment --- via eastmoney not sina
+# update via os.environment args
+# a. target scrapy into pg / b. crontab

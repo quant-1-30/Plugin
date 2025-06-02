@@ -7,7 +7,15 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.9"
+scrapy-redis = "^0.9.1"
+twisted = "^24.11.0"
+asyncpg = "^0.30.0"
+sqlalchemy = "^2.0.41"
 
+[[tool.poetry.source]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
+priority = "default" 
 
 [build-system]
 requires = ["poetry-core"]

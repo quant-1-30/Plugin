@@ -4,10 +4,11 @@
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 # useful for handling different item types with a single interface
 
-import logging, numpy as np
+import collections
+import logging
+import numpy as np
 from scrapy.exceptions import IgnoreRequest
 
-import base64
 from urllib.parse import unquote, urlunparse
 from urllib.request import getproxies, proxy_bypass, _parse_proxy
 
@@ -39,7 +40,6 @@ from scrapy.spiders import Spider
 from scrapy.statscollectors import StatsCollector
 from scrapy.utils.misc import load_object
 
-import logging
 from collections import defaultdict
 
 from scrapy.exceptions import NotConfigured
@@ -94,7 +94,6 @@ class TutorialDownloaderMiddleware:
     def process_request(self, request, spider):
         # Called for each request that goes through the downloader
         # middleware.
-
         # Must either:
         # - return None: continue processing this request
         # - or return a Response object
@@ -361,13 +360,18 @@ class TutorialSpiderMiddleware:
         # Should return None or raise an exception.
         return None
 
-    def process_spider_output(self, response, result, spider):
+    async def process_spider_output(self, response, result, spider):
         # Called with the results returned from the Spider, after
         # it has processed the response.
 
         # Must return an iterable of Request, or item objects.
-        for i in result:
-            yield i
+        # result 可能是异步生成器（async generator），我们需要异步迭代
+        if isinstance(result, collections.AsyncIterable):
+            async for r in result:
+                yield r
+        else:
+            for r in result:
+                yield r
 
     def process_spider_exception(self, response, exception, spider):
         # Called when a spider or process_spider_input() method
@@ -379,7 +383,7 @@ class TutorialSpiderMiddleware:
     def process_start_requests(self, start_requests, spider):
         # Called with the start requests of the spider, and works
         # similarly to the process_spider_output() method, except
-        # that it doesn’t have a response associated.
+        # that it doesn't have a response associated.
 
         # Must return only requests (not items).
         for r in start_requests:
@@ -390,16 +394,15 @@ class TutorialSpiderMiddleware:
 
 
 class ErrorSpiderMiddleware:
-
     handle_httpstatus_list = [301, 302, 456, 500, 502, 503, 504, 522, 524, 408, 429]
 
-    def process_spider_output(self, response, result, spider):
-        # if response.status in self.handle_httpstatus_list:
-        if response.status != 200:
-            request = response.request
-            return [request]
-        else:
-            return result
+    async def process_spider_output(self, response, result, spider):
+        if response.status in self.handle_httpstatus_list:
+            spider.logger.error(f"Received error status {response.status} for {response.url}")
+            return
+        
+        async for item in result:
+            yield item
 
 
 class HttpError(IgnoreRequest):

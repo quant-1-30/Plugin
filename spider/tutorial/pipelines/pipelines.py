@@ -13,14 +13,22 @@ Created on Tue Mar 12 15:37:47 2019
 
 # useful for handling different item types with a single interface
 
+import asyncio
+import asyncpg
 import h5py
 import numpy as np
 import pandas as pd
 from toolz import valmap
-from functools import partial
 from scrapy import signals
+from twisted.internet.defer import Deferred
+from scrapy.exceptions import NotConfigured
+from collections import defaultdict
+from sqlalchemy import text
 
-from tutorial.utils import coerce_to_uint32
+from tutorial.utils.tools import coerce_to_uint32
+from tutorial.utils.operator import async_ops
+
+__all__ = ['Basics', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
 
 
 class Pipeline:
@@ -41,6 +49,7 @@ class Pipeline:
 
     # core method
     def process_item(self, item, spider):
+        # itemloader add_value to return list object
         pass
 
     def close_spider(self, spider):
@@ -48,19 +57,18 @@ class Pipeline:
         pass
 
 
-class BasicsInfo(Pipeline):
+class Basics(Pipeline):
     """
         align item in order to construct frame finally
     """
-
     def process_item(self, item, spider):
         if item:
-            item = dict(item)
+            # item = dict(item)
             owner = item['owner'][0]
             if owner == 'basics':
                 item = valmap(lambda x: [(',').join(x)], item)
         return item
-
+    
 
 class Adjustment(Pipeline):
     """
@@ -77,41 +85,75 @@ class Adjustment(Pipeline):
                 item['sid'] = list(np.tile(sid, times.pop()))
                 item['owner'] = owner
         return item
+    
+
+class Rightment(Pipeline):
+    """
+        align item in order to construct frame finally
+    """
+    def process_item(self, item, spider):
+        if item:
+            pass
 
 
-# from twisted.enterprise import adbapi
-# from pymysql import cursors
-# from sqlalchemy.dialects.mysql import insert
-#
-#
-# class Writer(Pipeline):
-#     """
-#         enroll into mysql according to owner sid item
-#     """
-#     def __init__(self, db_pool):
-#         self.db_pool = db_pool
-#
-#     @classmethod
-#     def from_crawler(cls, crawler):
-#         settings = crawler.settings.get('MYSQL')
-#         db_params = dict(
-#             host=settings['host'],
-#             user=settings['username'],
-#             password=settings['password'],
-#             port=settings['port'],
-#             db=settings['db'],
-#             use_unicode=True,
-#             cursorclass=cursors.Cursor
-#         )
-#         db_pool = adbapi.ConnectionPool('pymysql', **db_params)
-#         return cls(db_pool)
+class AsyncDb(Pipeline):
 
-#     def insert_item(self, cursor, item):
-#         # on_duplicate_key_update to update instead of insert when duplicate key error
-#         pass
-#
-#     def process_item(self, item, spider):
-#         query = self.db_pool.runInteraction(self.insert_item, item)
+    def __init__(self, batch_size=1, max_retry=3):
+        self.batch_size = batch_size
+        self.max_retry = max_retry
+        self.loop = asyncio.get_event_loop()
+        self.buffer = defaultdict(list)
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        batch_size = crawler.settings.getint('POSTGRES_BATCH_SIZE', 1)
+        max_retry = crawler.settings.getint('POSTGRES_RETRY', 3)
+        return cls(batch_size, max_retry)
+
+    # def open_spider(self, spider):
+    #     self.conn = self.loop.run_until_complete(asyncpg.connect(dsn=self.dsn))
+
+    def close_spider(self, spider):
+        if self.buffer:
+            # self.loop.run_until_complete(self.conn.close()) # loop is already running  
+            asyncio.create_task(self._flush_buffer())
+
+    def process_item(self, item, spider):
+        self.buffer[spider.table_name].append(item)
+        if len(self.buffer) >= self.batch_size:
+            return Deferred.fromFuture(
+                asyncio.run_coroutine_threadsafe(self._flush_buffer(), self.loop)
+            )
+        return item
+
+    async def _flush_buffer(self):
+        sql = ""
+        try:
+            async with async_ops as ctx:
+                for table_name, items in self.buffer.items():
+                    for item in items:
+                        sql = text(f"INSERT INTO {table_name} VALUES (*)")
+                        await ctx.on_insert(sql, params=item)
+            self.buffer.clear()
+        except Exception as e:
+            # logger.warning(f"Insert failed, retrying... Error: {e}")
+            await self._retry_insert(sql)
+        return self.buffer
+
+    async def _retry_insert(self, sql):
+        for _ in range(self.max_retry):
+            try:
+                async with async_ops as ctx:
+                    for table_name, items in self.buffer.items():
+                        for item in items:
+                            await ctx.on_insert(sql, params=item)
+                self.buffer.clear()
+                return
+            except Exception as e:
+                pass
+        #         logger.warning(f"Retry {attempt+1} failed: {e}")
+        # logger.error("Max retry reached. Dropping items.")
+        self.buffer.clear()
 
 
 class HDF5Writer(Pipeline):
