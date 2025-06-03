@@ -22,7 +22,7 @@ from toolz import valmap
 from scrapy import signals
 # Deferred  to aviod block main thread
 from twisted.internet.defer import Deferred
-from collections import defaultdict
+from collections import namedtuple
 from sqlalchemy import text
 from datetime import datetime
 
@@ -30,6 +30,9 @@ from tutorial.utils.tools import coerce_to_uint32
 from tutorial.utils.operator import async_ops
 
 __all__ = ['Asset', 'Basics', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
+
+
+namedData = namedtuple('namedData', ['table_name', 'item'])
 
 
 class Pipeline:
@@ -84,12 +87,19 @@ class Adjustment(Pipeline):
 
     def process_item(self, item, spider):
         item = valmap(lambda x: x[0], item)
-        # ?: 非捕获组 只匹配
-        m_group = re.match(r'^[630]\d{5}(?:)', item["sid"])
+        if "ex_date" not in item:
+            # not implemented
+            return
+    
+        m_group = re.match(r'^[630]\d{5}(?:)', item["sid"]) # ?: 非捕获组 只匹配
         if m_group.group():
-            item['sid'] = m_group.group()
-            item['register_date'] = int(datetime.strptime(item['register_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+            item["sid"] = item["sid"].split('.')[0]
             item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+            item['report_date'] = int(datetime.strptime(item['report_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+            
+            register_date = item.get("register_date", 0)
+            item['register_date'] = int(datetime.strptime(register_date, '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d')) if register_date else 0
+            self.logger.info(f"Found Adjustment item: {item}")
             return item
     
 
@@ -99,89 +109,92 @@ class Rightment(Pipeline):
     """
     def process_item(self, item, spider):
         item = valmap(lambda x: x[0], item)
+        if "ex_date" not in item:
+            return
+
         item["sid"] = item["sid"].split('.')[0]
-        item['register_date'] = int(datetime.strptime(item['register_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
         item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+        
+        register_date = item.get("register_date", 0)
+        item['register_date'] = int(datetime.strptime(register_date, '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d')) if register_date else 0
         return item
 
 
 class AsyncDb(Pipeline):
-
     def __init__(self, batch_size=1, max_retry=3):
         self.batch_size = batch_size
         self.max_retry = max_retry
-        self.buffer = defaultdict(list)
+        self.queue = asyncio.Queue()
         self.logger = None
         self._loop = None
+        self._stop_signal = object()  # 标识关闭队列
+        self._worker_task = None
 
     @classmethod
     def from_crawler(cls, crawler):
-        batch_size = crawler.settings.getint('POSTGRES_BATCH_SIZE', 1)
-        max_retry = crawler.settings.getint('POSTGRES_RETRY', 3)
-        instance = cls(batch_size, max_retry)
+        instance = cls(
+            batch_size=crawler.settings.getint('POSTGRES_BATCH_SIZE', 1),
+            max_retry=crawler.settings.getint('POSTGRES_RETRY', 3)
+        )
         instance.logger = crawler.spider.logger
         instance._loop = asyncio.get_event_loop()
         return instance
 
+    def open_spider(self, spider):
+        # 启动后台消费者任务 / concurrent.futures.Future object 
+        self._worker_task = asyncio.run_coroutine_threadsafe(self._consume_loop(spider), self._loop)
+
     def process_item(self, item, spider):
-        if not item:
-            return item
-            
-        self.buffer[spider.table_name].append(item)
-        if len(self.buffer[spider.table_name]) >= self.batch_size:
-            return Deferred.fromFuture(
-                asyncio.run_coroutine_threadsafe(self._flush_buffer(spider), self._loop)
-            )
+        self.logger.info(f"Processing AsyncDb item: {item}")
+        if item:
+            # noblock put or raise queue.Full
+            self.queue.put_nowait(namedData(spider.table_name, item))
         return item
-
-    async def _flush_buffer(self, spider):
-        try:
-            async with async_ops as ops:
-                await ops.initialize(spider.crawler)
-                for table_name, items in self.buffer.items():
-                    for item in items:
-                        # 构建 INSERT 语句
-                        columns = ', '.join(item.keys())
-                        values = ', '.join([f':{k}' for k in item.keys()])
-                        sql = text(f"INSERT INTO {table_name} ({columns}) VALUES ({values})")
-                        await ops.on_insert(sql, item)
-            self.buffer.clear()
-        except Exception as e:
-            self.logger.error(f"Insert failed: {e}")
-            await self._retry_insert(spider)
-        return self.buffer
-
-    async def _retry_insert(self, spider):
-        for attempt in range(self.max_retry):
-            try:
-                async with async_ops as ops:
-                    await ops.initialize(spider.crawler)
-                    for table_name, items in self.buffer.items():
-                        for item in items:
-                            columns = ', '.join(item.keys())
-                            values = ', '.join([f':{k}' for k in item.keys()])
-                            sql = text(f"INSERT INTO {table_name} ({columns}) VALUES ({values})")
-                            await ops.on_insert(sql, item)
-                self.buffer.clear()
-                return
-            except Exception as e:
-                self.logger.error(f"Retry {attempt + 1} failed: {e}")
-                if attempt == self.max_retry - 1:
-                    self.logger.error("Max retry reached. Dropping items.")
-                    self.buffer.clear()
 
     def close_spider(self, spider):
         async def _close():
-            # 先处理剩余的数据
-            if self.buffer:
-                await self._flush_buffer(spider)
-            # 然后清理资源
+            # 发出终止信号
+            await self.queue.put(self._stop_signal)
+            # 等待消费者退出
+            if self._worker_task:
+                # concurrent.futures.Future object to async.Future which can be awaited
+                await asyncio.wrap_future(self._worker_task)
             await async_ops.cleanup()
 
-        # 使用 Deferred 来处理异步操作
         return Deferred.fromFuture(
             asyncio.run_coroutine_threadsafe(_close(), self._loop)
         )
+
+    async def _consume_loop(self, spider):
+        # batch = []
+        try:
+            async with async_ops as ops:
+                await ops.initialize(spider.crawler)
+                while True:
+                    data = await self.queue.get()
+                    if data is self._stop_signal:
+                        break
+                    await self._flush_batch([data], ops)
+                    # batch.append(data)
+                    # if len(batch) >= self.batch_size:
+                    #     await self._flush_batch(batch, ops)
+                    #     batch.clear()
+
+                # # flush remaining
+                # if batch:
+                #     await self._flush_batch(batch, ops)
+
+        except Exception as e:
+            self.logger.error(f"[AsyncDb] Background consume loop failed: {e}")
+
+    async def _flush_batch(self, batch, ops):
+        for named_data in batch:
+            table_name = named_data.table_name
+            item = named_data.item
+            columns = ', '.join(item.keys())
+            values = ', '.join([f':{k}' for k in item.keys()])
+            sql = text(f"INSERT INTO {table_name} ({columns}) VALUES ({values})")
+            await ops.on_insert(sql, item)
 
 
 class HDF5Writer(Pipeline):

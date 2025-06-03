@@ -5,6 +5,7 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
+import time
 import scrapy
 from scrapy.spiders import Spider
 
@@ -35,6 +36,7 @@ class BaseSpider(Spider):
         if retry_count < max_retries:
             self.logger.info(f"Retrying request {response.url} (attempt {retry_count + 1}/{max_retries})")
             meta['retry_count'] = retry_count + 1
+            time.sleep(2 ** retry_count)
             return scrapy.Request(
                 response.url,
                 callback=self.parse,

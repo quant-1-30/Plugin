@@ -1,10 +1,3 @@
-# # /usr/bin/env python3
-# # -*- coding : utf-8 -*-
-# """
-# Created on Tue Mar 12 15:37:47 2019
-
-# @author: python
-# """
 # ✅ 安装 AsyncioSelectorReactor 必须在任何 Twisted 导入之前
 from twisted.internet import asyncioreactor
 asyncioreactor.install()
@@ -32,9 +25,8 @@ runner = CrawlerRunner(get_project_settings())
 @defer.inlineCallbacks
 def crawl():
     # yield runner.crawl(Stock)
-    # yield runner.crawl(Rightment)
     yield runner.crawl(Adjustment)
-    # yield runner.crawl(Kline)
+    # yield runner.crawl(Rightment)
     reactor.stop()
 
 

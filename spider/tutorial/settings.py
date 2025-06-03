@@ -232,6 +232,13 @@ META_URLS = {
            'aspects': 'http://finance.sina.com.cn/realstock/company/%s/nc.shtml', # sina finance xpath
            }
 
+
+# https://datacenter-web.eastmoney.com/api/data/v1/get?&sortColumns=REPORT_DATE&sortTypes=-1&pageSize=50&pageNumber=1&reportName=RPT_SHAREBONUS_DET&columns=ALL&filter=(SECURITY_CODE%3D%22600502%22)
+
+
+# https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_IPO_ALLOTMENT&columns=ALL&quoteType=0&sortColumns=FIRST_NOTICE_DATE&sortTypes=-1&filter=(SECURITY_CODE%3D600036)
+
+
 # # kline
 Params = {'fields1': 'f1\x2Cf2\x2Cf3\x2Cf4\x2Cf5\x2Cf6',
           'fields2': 'f51\x2Cf52\x2Cf53\x2Cf54\x2Cf55\x2Cf56\x2Cf57\x2Cf58\x2Cf59\x2Cf60\x2Cf61',

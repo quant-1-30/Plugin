@@ -78,8 +78,8 @@ class Dividend(Item):
 
     # 代码
     sid = Field()
-    # # 公告日期
-    # declare_date = Field()
+    # # 报告日期
+    report_date = Field()
     # 股权登记日
     register_date = Field()
     # 除权除息日
@@ -112,8 +112,7 @@ class Right(Item):
 
     # 代码
     sid = Field()
-    # # 公告日期
-    # declare_date = Field()
+    
     # 股权登记日
     register_date = Field()
     # 除权日

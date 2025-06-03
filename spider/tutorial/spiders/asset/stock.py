@@ -5,13 +5,13 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
-from collections.abc import Iterable
+import numpy as np
 import scrapy
 import json
 import gzip
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
-import numpy as np
+from datetime import datetime
 
 from tutorial.items import AssetItem
 from tutorial.base import BaseSpider
@@ -40,21 +40,26 @@ class Stock(BaseSpider):
         "HTTPERROR_ALLOWED_CODES": [301, 302],  # 避免对这些状态报错
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed
+        # Middleware settings
+        "DOWNLOADER_MIDDLEWARES": {
+            'tutorial.middlewares.UserAgentMiddleware': 400,
+        },
         "ITEM_PIPELINES": {
+            'tutorial.pipelines.Asset': 400,
             'tutorial.pipelines.AsyncDb': 500,
         },
-        "FEEDS": {
-            "feeds/rightment/%(name)s_%(time)s.json": {
-                "format": "json",
-                "encoding": "utf-8",
-                "indent": 4,
-            },
-        },
+        # "FEEDS": {
+        #     "feeds/stock/%(name)s_%(time)s.json": {
+        #         "format": "json",
+        #         "encoding": "utf-8",
+        #         "indent": 4,
+        #     },
+        # },
         # 日志配置
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
-        "LOG_FILE": "logs/%(name)s_%(time)s.log",
+        "LOG_FILE": "logs/stock_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
         "LOG_ENABLED": True,
         "LOG_STDOUT": True,  # 同时输出到控制台
         "LOG_SHORT_NAMES": True,  # 使用短名称
