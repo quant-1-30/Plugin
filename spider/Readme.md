@@ -110,3 +110,6 @@ smtpssl (bool) – enforce using a secure SSL connection
 # asset / rightment / adjustment --- via eastmoney not sina
 # update via os.environment args
 # a. target scrapy into pg / b. crontab
+
+Deferred 是 Twisted 框架的核心概念之一，它提供了一种优雅的方式来处理异步操作，特别是在像 Scrapy 这样的事件驱动框架中
+Deferred.addCallback / addErrback

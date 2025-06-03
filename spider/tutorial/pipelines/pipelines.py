@@ -13,20 +13,23 @@ Created on Tue Mar 12 15:37:47 2019
 
 # useful for handling different item types with a single interface
 
+import re
 import asyncio
 import h5py
 import numpy as np
 import pandas as pd
 from toolz import valmap
 from scrapy import signals
+# Deferred  to aviod block main thread
 from twisted.internet.defer import Deferred
 from collections import defaultdict
 from sqlalchemy import text
+from datetime import datetime
 
 from tutorial.utils.tools import coerce_to_uint32
 from tutorial.utils.operator import async_ops
 
-__all__ = ['Asset', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
+__all__ = ['Asset', 'Basics', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
 
 
 class Pipeline:
@@ -37,6 +40,7 @@ class Pipeline:
     @classmethod
     def from_crawler(cls, crawler):
         instance = cls()
+        instance.logger = crawler.spider.logger
         crawler.signals.connect(instance.open_spider, signal=signals.spider_opened)
         crawler.signals.connect(instance.close_spider, signal=signals.spider_closed)
         return instance
@@ -58,9 +62,8 @@ class Pipeline:
 class Asset(Pipeline):
 
     def process_item(self, item, spider):
-        if item:
-            item = valmap(lambda x: x[0], item)
-            item.setdefault("delist", 0)
+        item = valmap(lambda x: x[0], item)
+        item.setdefault("delist", 0)
         return item
 
 
@@ -80,12 +83,14 @@ class Adjustment(Pipeline):
     """
 
     def process_item(self, item, spider):
-        if item:
-            sid = item.pop('sid')
-            nums = valmap(lambda x: int(len(x) / len(sid)), item)
-            times = set(nums.values())
-            item['sid'] = list(np.tile(sid, times.pop()))
-        return item
+        item = valmap(lambda x: x[0], item)
+        # ?: 非捕获组 只匹配
+        m_group = re.match(r'^[630]\d{5}(?:)', item["sid"])
+        if m_group.group():
+            item['sid'] = m_group.group()
+            item['register_date'] = int(datetime.strptime(item['register_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+            item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+            return item
     
 
 class Rightment(Pipeline):
@@ -93,8 +98,11 @@ class Rightment(Pipeline):
         align item in order to construct frame finally
     """
     def process_item(self, item, spider):
-        if item:
-            pass
+        item = valmap(lambda x: x[0], item)
+        item["sid"] = item["sid"].split('.')[0]
+        item['register_date'] = int(datetime.strptime(item['register_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+        item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
+        return item
 
 
 class AsyncDb(Pipeline):
@@ -104,6 +112,7 @@ class AsyncDb(Pipeline):
         self.max_retry = max_retry
         self.buffer = defaultdict(list)
         self.logger = None
+        self._loop = None
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -111,6 +120,7 @@ class AsyncDb(Pipeline):
         max_retry = crawler.settings.getint('POSTGRES_RETRY', 3)
         instance = cls(batch_size, max_retry)
         instance.logger = crawler.spider.logger
+        instance._loop = asyncio.get_event_loop()
         return instance
 
     def process_item(self, item, spider):
@@ -120,7 +130,7 @@ class AsyncDb(Pipeline):
         self.buffer[spider.table_name].append(item)
         if len(self.buffer[spider.table_name]) >= self.batch_size:
             return Deferred.fromFuture(
-                asyncio.run_coroutine_threadsafe(self._flush_buffer(spider), asyncio.get_event_loop())
+                asyncio.run_coroutine_threadsafe(self._flush_buffer(spider), self._loop)
             )
         return item
 
@@ -161,9 +171,17 @@ class AsyncDb(Pipeline):
                     self.buffer.clear()
 
     def close_spider(self, spider):
-        if self.buffer:
-            asyncio.create_task(self._flush_buffer(spider))
-        asyncio.create_task(async_ops.cleanup())
+        async def _close():
+            # 先处理剩余的数据
+            if self.buffer:
+                await self._flush_buffer(spider)
+            # 然后清理资源
+            await async_ops.cleanup()
+
+        # 使用 Deferred 来处理异步操作
+        return Deferred.fromFuture(
+            asyncio.run_coroutine_threadsafe(_close(), self._loop)
+        )
 
 
 class HDF5Writer(Pipeline):

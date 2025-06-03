@@ -78,45 +78,65 @@ class Dividend(Item):
 
     # 代码
     sid = Field()
-    # 公告日期
-    declare_date = Field()
+    # # 公告日期
+    # declare_date = Field()
     # 股权登记日
     register_date = Field()
     # 除权除息日
     ex_date = Field()
-    # 红股上市日
-    market_date = Field()
+    # # 红股上市日
+    # market_date = Field()
     # 送股(股)
-    bonus = Field()
+    bonus_share = Field()
     # 转增(股)
     transfer = Field()
     # 派息(税前)(元)
-    interest = Field()
-    # 分红方案(每10股)
-    divdend_plan = Field()
-    # 进度
-    progress = Field()
+    bonus = Field()
+    # # 分红方案(每10股)
+    # divdend_plan = Field()
+    # # 进度
+    # progress = Field()
+
+
+    # sid: Mapped[str] = mapped_column(String(20), 
+    #                                  ForeignKey("asset.sid", onupdate="CASCADE", ondelete="CASCADE"), 
+    #                                  nullable=False, use_existing_column=True)
+    # register_date: Mapped[int] = mapped_column(Integer, nullable=False, use_existing_column=True)
+    # ex_date: Mapped[int] = mapped_column(Integer, nullable=False, use_existing_column=True)
+    # share: Mapped[int] = mapped_column(Integer, nullable=True, use_existing_column=True)
+    # transfer: Mapped[int] = mapped_column(Integer, nullable=True, use_existing_column=True)
+    # interest: Mapped[int] = mapped_column(Integer, nullable=True, use_existing_column=True)
 
 
 class Right(Item):
 
     # 代码
     sid = Field()
-    # 公告日期
-    declare_date = Field()
-    # 除权日
-    register_date = Field()
-    # 配股上市日
-    ex_date = Field()
+    # # 公告日期
+    # declare_date = Field()
     # 股权登记日
-    market_date = Field()
+    register_date = Field()
+    # 除权日
+    ex_date = Field()
+    # # 配股上市日
+    # market_date = Field()
     # 配股方案
-    bonus = Field()
+    ratio = Field()
     # 配股价格(元)
     price = Field()
-    # 基准股本(股)
-    base = Field()
+    # # 基准股本(股)
+    # base = Field()
     
+
+    # id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # sid: Mapped[str] = mapped_column(String(20), 
+    #                                  ForeignKey("asset.sid", onupdate="CASCADE", ondelete="CASCADE"), 
+    #                                  nullable=False, primary_key=True, use_existing_column=True)
+    # register_date: Mapped[int] = mapped_column(Integer, nullable=False, use_existing_column=True)
+    # ex_date: Mapped[int] = mapped_column(Integer, nullable=False, use_existing_column=True)
+    # # effective_date: Mapped[int] = mapped_column(Integer, nullable=False, use_existing_column=True)
+    # price: Mapped[int] = mapped_column(Integer, nullable=True, use_existing_column=True)
+    # ratio: Mapped[int] = mapped_column(Integer, nullable=True, use_existing_column=True)
 
 # 股权结构
 class Ownership(Item):

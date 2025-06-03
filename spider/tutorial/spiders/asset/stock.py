@@ -11,9 +11,12 @@ import json
 import gzip
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
+import numpy as np
 
 from tutorial.items import AssetItem
 from tutorial.base import BaseSpider
+
+__all__ = ['Stock']
 
 
 class Stock(BaseSpider):
@@ -24,10 +27,42 @@ class Stock(BaseSpider):
     handle_httpstatus_list = [301, 302]
     
     custom_settings = {
-        'ITEM_PIPELINES': {
-            'tutorial.pipelines.Asset': 300,
-            'tutorial.pipelines.AsyncDb': 400,
-        }
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
+        "AUTOTHROTTLE_MAX_DELAY": np.random.randint(20, 30),
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 1,
+        'DOWNLOAD_DELAY': np.random.randint(5, 10),  # Example setting: delay between requests
+        'CONCURRENT_REQUESTS': 1,  # Example setting: number of concurrent requests
+        # retry
+        "RETRY_ENABLED": True,
+        "RETRY_TIMES": 3,
+        "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408, 429],
+        "HTTPERROR_ALLOWED_CODES": [301, 302],  # 避免对这些状态报错
+        "DOWNLOAD_TIMEOUT": 20,
+        # Add more custom settings as needed
+        "ITEM_PIPELINES": {
+            'tutorial.pipelines.AsyncDb': 500,
+        },
+        "FEEDS": {
+            "feeds/rightment/%(name)s_%(time)s.json": {
+                "format": "json",
+                "encoding": "utf-8",
+                "indent": 4,
+            },
+        },
+        # 日志配置
+        "LOG_LEVEL": "INFO",
+        "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
+        "LOG_FILE": "logs/%(name)s_%(time)s.log",
+        "LOG_ENABLED": True,
+        "LOG_STDOUT": True,  # 同时输出到控制台
+        "LOG_SHORT_NAMES": True,  # 使用短名称
+        "LOGSTATS_INTERVAL": 60,  # 每60秒输出一次统计信息
+        "LOGSTATS_DUMP": True,  # 在爬虫关闭时输出统计信息
+        "LOGSTATS_LEVEL": "INFO",  # 统计信息的日志级别
+        "LOGSTATS_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",  # 统计信息的格式
+        "LOGSTATS_DATEFORMAT": "%Y-%m-%d %H:%M:%S",  # 统计信息的时间格式
     }
 
     async def start(self):
@@ -35,16 +70,16 @@ class Stock(BaseSpider):
         params = {'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23',
                   'fields': 'f12,f14,f26',
                   'pn': 1,
-                  'pz': 50000}
-        equity_url = self.routers['assets'] + urlencode(params, quote_via=quote)
-        self.logger.info(f"Requesting URL: {equity_url}")
-        yield scrapy.Request(equity_url, callback=self.parse, 
-                             meta={'page': 1, 'params': params}, dont_filter=True)
+                  'pz': 100} # 10000
+        start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
+        self.logger.info(f"Requesting URL: {start_url}")
+        yield scrapy.Request(start_url, callback=self.parse, 
+                             meta={'page': 1, 'params': params, 'retry_count': 0}, 
+                             errback=self.errback_httpbin,
+                             dont_filter=True)
 
     def parse(self, response, **kwargs):
-        self.logger.info(f"Parsing response from {response.url}")
-        self.logger.info(f"Response status: {response.status}")
-        self.logger.info(f"Response headers: {response.headers}") 
+        self.logger.info(f"Response headers: {response.headers} url: {response.url} and status: {response.status}")
         try:
             # 检查响应是否被压缩
             body = (
@@ -52,15 +87,13 @@ class Stock(BaseSpider):
                 if response.headers.get('Content-Encoding') == b'gzip'
                 else response.body
             )
-
             content = json.loads(body)
-            self.logger.info(f"Parsed JSON content: {content}")
             
             if 'data' not in content:
-                self.logger.error(f"No 'data' field in response: {content}")
+                self.logger.error(f"No 'data' field in content")
                 return
                 
-            diff = content['data'].get('diff', [])
+            diff = content['data'].get('diff', {})
             self.logger.info(f"Found {len(diff)} items in response")
             
             if not diff:
@@ -69,35 +102,29 @@ class Stock(BaseSpider):
             
             # set loader
             for _, obj in diff.items():
-                try:
-                    self.logger.info(f"Processing item: {obj}")
-                    asset = ItemLoader(item=AssetItem())
-                    asset.add_value('sid', obj['f12'])
-                    asset.add_value('name', obj['f14'])
-                    asset.add_value('first_trading', obj['f26'])
+                asset = ItemLoader(item=AssetItem())
+                asset.add_value('sid', obj['f12'])
+                asset.add_value('name', obj['f14'])
+                asset.add_value('first_trading', obj['f26'])
                     
-                    item = asset.load_item()
-                    # self.logger.info(f"Yielding item: {item}")
-                    yield item
-                except KeyError as e:
-                    self.logger.error(f"Missing key in object: {e}, object: {obj}")
-                except Exception as e:
-                    self.logger.error(f"Error processing item: {e}, object: {obj}")
+                item = asset.load_item()
+                yield item
             
             # next page
             meta = response.meta
             meta['page'] += 1
             params = meta['params']
             params['pn'] = meta['page']
-            equity_url = self.routers['assets'] + urlencode(params, quote_via=quote)
-            self.logger.info(f"Requesting next page: {equity_url}")
+            next_url = self.routers['assets'] + urlencode(params, quote_via=quote)
+            self.logger.info(f"Requesting next page: {next_url}")
 
-            # yield scrapy.Request(equity_url, callback=self.parse, 
-            #                      meta={'page': meta['page'], 'params': params}, dont_filter=True)
+            yield scrapy.Request(next_url, callback=self.parse, 
+                                 meta={'page': meta['page'], 'params': params, 'retry_count': 0}, 
+                                 errback=self.errback_httpbin,
+                                 dont_filter=True)
 
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse JSON response: {e}")
-            self.logger.error(f"Response body: {response.body[:1000]}")
+        # except json.JSONDecodeError as e:
+        #     self.logger.error(f"Failed to parse JSON response: {e}")
         except Exception as e:
             self.logger.error(f"Unexpected error in parse: {e}")
-            self.logger.error(f"Response body: {response.body[:1000]}")
+            return self._retry_request(response)

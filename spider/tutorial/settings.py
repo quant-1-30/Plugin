@@ -208,7 +208,7 @@ CONCURRENT_REQUESTS_PER_IP = 16
 # HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
 
 # set log
-LOG_FILE = 'log/{s}.log'.format(s=datetime.datetime.now().strftime('%Y%m%d_%H:%M:%S'))
+LOG_FILE = 'logs/{s}.log'.format(s=datetime.datetime.now().strftime('%Y%m%d_%H:%M:%S'))
 LOG_LEVEL = 'INFO'
 
 # mail
@@ -225,10 +225,11 @@ STATSMAILER_RCPTS = ['13776668123@163.com']
 # router 由于内部定义的keys才可以从from_crawler获取 , 全局配置; 找一个无关紧要的配置项
 META_URLS = {
            'assets': 'http://push2.eastmoney.com/api/qt/clist/get?',
-           'aspects': 'http://finance.sina.com.cn/realstock/company/%s/nc.shtml',
-           'bond': 'http://dcfm.eastmoney.com/em_mutisvcexpandinterface/api/js/get?',
-           'kline': 'http://push2his.eastmoney.com/api/qt/stock/kline/get?',
-           'rightment': "https://datacenter-web.eastmoney.com/api/data/v1/get?sortTypes=-1&pageSize=50&pageNumber=1&reportName=RPT_IPO_ALLOTMENT&columns=ALL",
+           'rightment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
+           'adjustment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
+         #   'kline': 'http://push2his.eastmoney.com/api/qt/stock/kline/get?',
+         #   'bond': 'http://dcfm.eastmoney.com/em_mutisvcexpandinterface/api/js/get?',
+           'aspects': 'http://finance.sina.com.cn/realstock/company/%s/nc.shtml', # sina finance xpath
            }
 
 # # kline
