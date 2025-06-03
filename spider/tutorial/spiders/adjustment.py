@@ -68,10 +68,8 @@ class Adjustment(BaseSpider):
         if not datas:
             return
 
-        # set loader
-        adjustment = ItemLoader(item=Dividend())
-   
         for obj in datas:
+            adjustment = ItemLoader(item=Dividend())
             # 2023-11-27 00:00:00
             adjustment.add_value('sid', obj['SECUCODE'])
             adjustment.add_value('name', obj['SECURITY_NAME_ABBR'])
@@ -81,8 +79,9 @@ class Adjustment(BaseSpider):
             adjustment.add_value('market_date', obj['LISTING_DATE'])
             adjustment.add_value('bonus', obj['PLACING_RATIO'])
             adjustment.add_value('price', obj['ISSUE_PRICE'])
-        items = adjustment.load_item()
-        yield items
+            item = adjustment.load_item()
+            self.logger.info(f"Yielding item: {item}")
+            yield item
         
         # next page
         meta['page'] += 1

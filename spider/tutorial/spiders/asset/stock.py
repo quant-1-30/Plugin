@@ -23,9 +23,12 @@ class Stock(BaseSpider):
     allowed_domains = ['push2.eastmoney.com', 'finance.sina.com.cn', 'push2his.eastmoney.com']
     handle_httpstatus_list = [301, 302]
     
-    # custom_settings = {
-    #     'SOME_SETTING': 'some value',
-    # }
+    custom_settings = {
+        'ITEM_PIPELINES': {
+            'tutorial.pipelines.Asset': 300,
+            'tutorial.pipelines.AsyncDb': 400,
+        }
+    }
 
     async def start(self):
         self.logger.info("Starting stock spider...")
@@ -41,8 +44,7 @@ class Stock(BaseSpider):
     def parse(self, response, **kwargs):
         self.logger.info(f"Parsing response from {response.url}")
         self.logger.info(f"Response status: {response.status}")
-        self.logger.info(f"Response headers: {response.headers}")
-        
+        self.logger.info(f"Response headers: {response.headers}") 
         try:
             # 检查响应是否被压缩
             body = (
@@ -75,7 +77,7 @@ class Stock(BaseSpider):
                     asset.add_value('first_trading', obj['f26'])
                     
                     item = asset.load_item()
-                    self.logger.info(f"Yielding item: {item}")
+                    # self.logger.info(f"Yielding item: {item}")
                     yield item
                 except KeyError as e:
                     self.logger.error(f"Missing key in object: {e}, object: {obj}")
@@ -89,6 +91,7 @@ class Stock(BaseSpider):
             params['pn'] = meta['page']
             equity_url = self.routers['assets'] + urlencode(params, quote_via=quote)
             self.logger.info(f"Requesting next page: {equity_url}")
+
             # yield scrapy.Request(equity_url, callback=self.parse, 
             #                      meta={'page': meta['page'], 'params': params}, dont_filter=True)
 

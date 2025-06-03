@@ -4,6 +4,7 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from contextlib import asynccontextmanager
+from sqlalchemy.sql import text
 
 from tutorial.meta import with_metaclass, MetaSingleton
 
@@ -18,109 +19,100 @@ class AsyncOps(with_metaclass(MetaSingleton, object)):
     To keep compatible with old qlib provider.
     select and insert in seprate mode / begin used in insert / select just session is ok
     """
-    # SQLALCHEMY_DATABASE_URL = f"sqlite:///{SQLITE_DB_PATH}" # dsn
-    params = (
-        ("host", "localhost"),
-        ("port", "5432"),
-        ("user", "postgres"),
-        ("pwd", "20210718"),
-        ("db", "bt_oms"),
-        ("engine", "psycopg"),
-        ("pool_size", 20),
-        ("max_overflow", 10),
-        ("pool_recycle", 3600),
-        ("pool_pre_ping", True),
-        ("echo", True)
-    )
-
     def __init__(self):
         self._initialized = False
+        self.engine = None
+        self.session = None
 
     async def __aenter__(self):
         await self.initialize()
         return self
     
-    async def initialize(self):
+    async def initialize(self, crawler=None):
         """Async initialization method"""
         if self._initialized:
             return
-        await self._build_engine()
+        await self._build_engine(crawler)
         self._initialized = True
 
-    async def _build_engine(self):
+    async def _build_engine(self, crawler=None):
         """
             a. create all tables
             b. reflect tables
             c. bug --- every restart service result scan model to recreate (rollback)
         """
-        # postgresql+psycopg2cffi://user:password@host:port/dbname[?key=value&key=value...]
-        # postgresql+psycopg2://me@localhost/mydb
-        # postgresql+asyncpg://me@localhost/mydb
-        print("builder ", self)
-        url = f"postgresql+{self.p.engine}://{self.p.user}:{self.p.pwd}@{self.p.host}:{self.p.port}/{self.p.db}"
-        # READ COMMITTED
-        # READ UNCOMMITTED
-        # REPEATABLE READ
-        # SERIALIZABLE
-        engine = create_async_engine(url, 
-                               pool_size=self.p.pool_size, 
-                               max_overflow=self.p.max_overflow,
-                               # 每小时回收连接
-                               pool_recycle=3600, 
-                               # 使用 ping 检查连接有效性 
-                               pool_pre_ping=self.p.pool_pre_ping,
-                               # stream_results = True/ False
-                               # autocommit = True/ False
-                               # compiled_cache = True/ False
-                               # isolation_level = "AUTOCOMMIT"
-                               echo=self.p.echo).execution_options(compiled_cache={})
-        setattr(self, "engine", engine)
+        if crawler:
+            url = f"postgresql+{crawler.settings.get('POSTGRES_ENGINE')}://{crawler.settings.get('POSTGRES_USER')}:{crawler.settings.get('POSTGRES_PASSWORD')}@{crawler.settings.get('POSTGRES_HOST')}:{crawler.settings.get('POSTGRES_PORT')}/{crawler.settings.get('POSTGRES_DB')}"
+            self.engine = create_async_engine(
+                url,
+                pool_size=crawler.settings.getint('POSTGRES_POOL_SIZE'),
+                max_overflow=crawler.settings.getint('POSTGRES_MAX_OVERFLOW'),
+                pool_recycle=crawler.settings.getint('POSTGRES_POOL_RECYCLE'),
+                pool_pre_ping=crawler.settings.getbool('POSTGRES_POOL_PRE_PING'),
+                echo=crawler.settings.getbool('POSTGRES_ECHO')
+            )
+        else:
+            # 使用默认配置
+            url = "postgresql+asyncpg://postgres:20210718@localhost:5432/bt_feed"
+            self.engine = create_async_engine(
+                url,
+                pool_size=20,
+                max_overflow=10,
+                pool_recycle=3600,
+                pool_pre_ping=True,
+                echo=True
+            )
+
+    async def reset_sequence(self, table_name):
+        """重置表的自增序列"""
+        async with self.get_db() as session:
+            # 获取当前序列名
+            result = await session.execute(text(f"""
+                SELECT pg_get_serial_sequence('{table_name}', 'id')
+            """))
+            sequence_name = result.scalar()
+            
+            if sequence_name:
+                # 重置序列
+                await session.execute(text(f"""
+                    ALTER SEQUENCE {sequence_name} RESTART WITH 1
+                """))
+                await session.commit()
 
     @asynccontextmanager
     async def get_db(self):
-        AsyncSessionLocal = sessionmaker(
-            bind=self.engine,
-            class_=AsyncSession,
-            expire_on_commit=False
-        )
-        session = AsyncSessionLocal()
-        print("session", session)
+        if not self.session:
+            async_session = sessionmaker(
+                self.engine, class_=AsyncSession, expire_on_commit=False
+            )
+            self.session = async_session()
         try:
-                yield session
+            yield self.session
         finally:
-                await session.close()
+            await self.session.close()
+            self.session = None
     
     async def on_query(self, query, params):
         async with self.get_db() as session:
-            # stmt = select(cal).execution_options(**self.options)
-            # AsyncSession not support query 
-            # result = await session.execute(query)
-            # yield result.scalars().all()
-            # in asynchronous mode, the synchronous yield_per isn't directly applicable. 
-            # Instead, you can use the stream() method, which allows streaming query results asynchronously.
-            row = await session.execute(query, params)
-            # stream.scalars() return one field
-            # async for row in stream.scalars():
-            return row.scalars().all()
+            result = await session.execute(query, params)
+            return result.scalars().all()
 
     async def on_insert(self, sql, params):
         async with self.get_db() as session:
             async with session.begin():
-                result = await session.execute(sql, params)
-                insert_result = result.fetchone()
-                return insert_result
+                await session.execute(sql, params)
+                await session.commit()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-            if exc_type is not None:
-                print(f"Error: {exc_type}, {exc_value}, {traceback}")
-            # True mean suppress exception
-            return True
+        if exc_type is not None:
+            print(f"Error: {exc_type}, {exc_value}, {traceback}")
+        return True
     
     async def cleanup(self):
-        # 释放所有连接，断开数据库 / 清理的
-        self.engine.dispose()
-        print("cleanup")
-
+        if self.engine:
+            await self.engine.dispose()
+            self.engine = None
+        self._initialized = False
 
 async_ops = AsyncOps()
 

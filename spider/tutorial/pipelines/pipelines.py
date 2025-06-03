@@ -14,21 +14,19 @@ Created on Tue Mar 12 15:37:47 2019
 # useful for handling different item types with a single interface
 
 import asyncio
-import asyncpg
 import h5py
 import numpy as np
 import pandas as pd
 from toolz import valmap
 from scrapy import signals
 from twisted.internet.defer import Deferred
-from scrapy.exceptions import NotConfigured
 from collections import defaultdict
 from sqlalchemy import text
 
 from tutorial.utils.tools import coerce_to_uint32
 from tutorial.utils.operator import async_ops
 
-__all__ = ['Basics', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
+__all__ = ['Asset', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
 
 
 class Pipeline:
@@ -57,33 +55,36 @@ class Pipeline:
         pass
 
 
+class Asset(Pipeline):
+
+    def process_item(self, item, spider):
+        if item:
+            item = valmap(lambda x: x[0], item)
+            item.setdefault("delist", 0)
+        return item
+
+
 class Basics(Pipeline):
     """
         align item in order to construct frame finally
     """
     def process_item(self, item, spider):
         if item:
-            # item = dict(item)
-            owner = item['owner'][0]
-            if owner == 'basics':
-                item = valmap(lambda x: [(',').join(x)], item)
+            item = valmap(lambda x: [(',').join(x)], item)
         return item
     
 
 class Adjustment(Pipeline):
     """
-        align item in order to construct frame finally
+       xpath of sina adjustment
     """
+
     def process_item(self, item, spider):
         if item:
-            owner = item['owner'][0]
-            if owner in ['dividends', 'rights', 'ownership']:
-                sid = item.pop('sid')
-                owner = item.pop('owner')
-                nums = valmap(lambda x: int(len(x) / len(sid)), item)
-                times = set(nums.values())
-                item['sid'] = list(np.tile(sid, times.pop()))
-                item['owner'] = owner
+            sid = item.pop('sid')
+            nums = valmap(lambda x: int(len(x) / len(sid)), item)
+            times = set(nums.values())
+            item['sid'] = list(np.tile(sid, times.pop()))
         return item
     
 
@@ -101,59 +102,68 @@ class AsyncDb(Pipeline):
     def __init__(self, batch_size=1, max_retry=3):
         self.batch_size = batch_size
         self.max_retry = max_retry
-        self.loop = asyncio.get_event_loop()
         self.buffer = defaultdict(list)
+        self.logger = None
 
     @classmethod
     def from_crawler(cls, crawler):
         batch_size = crawler.settings.getint('POSTGRES_BATCH_SIZE', 1)
         max_retry = crawler.settings.getint('POSTGRES_RETRY', 3)
-        return cls(batch_size, max_retry)
-
-    # def open_spider(self, spider):
-    #     self.conn = self.loop.run_until_complete(asyncpg.connect(dsn=self.dsn))
-
-    def close_spider(self, spider):
-        if self.buffer:
-            # self.loop.run_until_complete(self.conn.close()) # loop is already running  
-            asyncio.create_task(self._flush_buffer())
+        instance = cls(batch_size, max_retry)
+        instance.logger = crawler.spider.logger
+        return instance
 
     def process_item(self, item, spider):
+        if not item:
+            return item
+            
         self.buffer[spider.table_name].append(item)
-        if len(self.buffer) >= self.batch_size:
+        if len(self.buffer[spider.table_name]) >= self.batch_size:
             return Deferred.fromFuture(
-                asyncio.run_coroutine_threadsafe(self._flush_buffer(), self.loop)
+                asyncio.run_coroutine_threadsafe(self._flush_buffer(spider), asyncio.get_event_loop())
             )
         return item
 
-    async def _flush_buffer(self):
-        sql = ""
+    async def _flush_buffer(self, spider):
         try:
-            async with async_ops as ctx:
+            async with async_ops as ops:
+                await ops.initialize(spider.crawler)
                 for table_name, items in self.buffer.items():
                     for item in items:
-                        sql = text(f"INSERT INTO {table_name} VALUES (*)")
-                        await ctx.on_insert(sql, params=item)
+                        # 构建 INSERT 语句
+                        columns = ', '.join(item.keys())
+                        values = ', '.join([f':{k}' for k in item.keys()])
+                        sql = text(f"INSERT INTO {table_name} ({columns}) VALUES ({values})")
+                        await ops.on_insert(sql, item)
             self.buffer.clear()
         except Exception as e:
-            # logger.warning(f"Insert failed, retrying... Error: {e}")
-            await self._retry_insert(sql)
+            self.logger.error(f"Insert failed: {e}")
+            await self._retry_insert(spider)
         return self.buffer
 
-    async def _retry_insert(self, sql):
-        for _ in range(self.max_retry):
+    async def _retry_insert(self, spider):
+        for attempt in range(self.max_retry):
             try:
-                async with async_ops as ctx:
+                async with async_ops as ops:
+                    await ops.initialize(spider.crawler)
                     for table_name, items in self.buffer.items():
                         for item in items:
-                            await ctx.on_insert(sql, params=item)
+                            columns = ', '.join(item.keys())
+                            values = ', '.join([f':{k}' for k in item.keys()])
+                            sql = text(f"INSERT INTO {table_name} ({columns}) VALUES ({values})")
+                            await ops.on_insert(sql, item)
                 self.buffer.clear()
                 return
             except Exception as e:
-                pass
-        #         logger.warning(f"Retry {attempt+1} failed: {e}")
-        # logger.error("Max retry reached. Dropping items.")
-        self.buffer.clear()
+                self.logger.error(f"Retry {attempt + 1} failed: {e}")
+                if attempt == self.max_retry - 1:
+                    self.logger.error("Max retry reached. Dropping items.")
+                    self.buffer.clear()
+
+    def close_spider(self, spider):
+        if self.buffer:
+            asyncio.create_task(self._flush_buffer(spider))
+        asyncio.create_task(async_ops.cleanup())
 
 
 class HDF5Writer(Pipeline):

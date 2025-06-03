@@ -16,14 +16,28 @@ import datetime
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+BOT_NAME = 'backtest'
+
 # 添加异步支持
 TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
-
-BOT_NAME = 'backtest'
 
 SPIDER_MODULES = ['tutorial.spiders']
 NEWSPIDER_MODULE = 'tutorial.spiders'
 
+# Database settings
+POSTGRES_HOST = 'localhost'
+POSTGRES_PORT = '5432'
+POSTGRES_USER = 'postgres'
+POSTGRES_PASSWORD = '20210718'
+POSTGRES_DB = 'bt_feed'
+POSTGRES_ENGINE = 'asyncpg'
+POSTGRES_POOL_SIZE = 20
+POSTGRES_MAX_OVERFLOW = 10
+POSTGRES_POOL_RECYCLE = 3600
+POSTGRES_POOL_PRE_PING = True
+POSTGRES_ECHO = True
+POSTGRES_BATCH_SIZE = 100
+POSTGRES_RETRY = 3
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 # USER_AGENT = 'test'
@@ -164,10 +178,6 @@ ITEM_PIPELINES = {
    #  'tutorial.pipelines.AlignPipeline': 400,
     'tutorial.pipelines.AsyncDb': 500,
 }
-
-# AsyncDb
-POSTGRES_BATCH_SIZE = 100
-POSTGRES_RETRY = 3
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
