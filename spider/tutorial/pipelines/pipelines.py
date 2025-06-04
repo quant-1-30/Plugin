@@ -121,14 +121,16 @@ class Rightment(Pipeline):
 
 
 class AsyncDb(Pipeline):
-    def __init__(self, batch_size=1, max_retry=3):
+    def __init__(self, batch_size=10, flush_interval=10, max_retry=3):
         self.batch_size = batch_size
         self.max_retry = max_retry
+        self.flush_interval = flush_interval
         self.queue = asyncio.Queue()
+        self.buffer = []
         self.logger = None
-        self._loop = None
-        self._stop_signal = object()  # 标识关闭队列
         self._worker_task = None
+        self._stop_signal = object()  # 标识关闭队列
+        self._loop = None
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -166,26 +168,38 @@ class AsyncDb(Pipeline):
         )
 
     async def _consume_loop(self, spider):
-        # batch = []
+        # 单线程执行不存在 多个协程并发修改 self.buffer --- asyncio.lock
         try:
             async with async_ops as ops:
                 await ops.initialize(spider.crawler)
-                while True:
-                    data = await self.queue.get()
-                    if data is self._stop_signal:
-                        break
-                    await self._flush_batch([data], ops)
-                    # batch.append(data)
-                    # if len(batch) >= self.batch_size:
-                    #     await self._flush_batch(batch, ops)
-                    #     batch.clear()
 
-                # # flush remaining
-                # if batch:
-                #     await self._flush_batch(batch, ops)
+                while True:
+                    try:
+                        # timeout 是为了保证 flush_interval 后能继续走逻辑
+                        data = await asyncio.wait_for(self.queue.get(), timeout=self.flush_interval)
+                        if data is self._stop_signal:
+                            break
+
+                        self.buffer.append(data)
+
+                        # 满 batch 大小就 flush
+                        if len(self.buffer) >= self.batch_size:
+                            await self._flush_batch(self.buffer, ops)
+                            self.buffer.clear()
+
+                    except asyncio.TimeoutError:
+                        # 到达 flush_interval，强制 flush
+                        if self.buffer:
+                            await self._flush_batch(self.buffer, ops)
+                            self.buffer.clear()
+
+                # 停止时最后 flush 一次
+                if self.buffer:
+                    await self._flush_batch(self.buffer, ops)
+                    self.buffer.clear()
 
         except Exception as e:
-            self.logger.error(f"[AsyncDb] Background consume loop failed: {e}")
+            self.logger.error(f"[AsyncDb] Background consume loop failed: {e}", exc_info=True)
 
     async def _flush_batch(self, batch, ops):
         for named_data in batch:

@@ -53,11 +53,11 @@ class Rightment(BaseSpider):
         "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
         "AUTOTHROTTLE_MAX_DELAY": np.random.randint(20, 30),
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 1,
-        'DOWNLOAD_DELAY': np.random.randint(5, 10),  # Example setting: delay between requests
+        'DOWNLOAD_DELAY': np.random.randint(10, 20),  # Example setting: delay between requests
         'CONCURRENT_REQUESTS': 1,  # Example setting: number of concurrent requests
         # retry
         "RETRY_ENABLED": True,
-        "RETRY_TIMES": 3,
+        "RETRY_TIMES": 5,
         "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408, 429],
         "HTTPERROR_ALLOWED_CODES": [301, 302],  # 避免对这些状态报错
         "DOWNLOAD_TIMEOUT": 20,
@@ -91,7 +91,7 @@ class Rightment(BaseSpider):
         params = {'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23',
                   'fields': 'f12,f14,f26',
                   'pn': 1,
-                  'pz': 100}
+                  'pz': 50}
         start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
         yield scrapy.Request(start_url, callback=self.parse, 
                              meta={'page': 1, 'params': params, 'retry_count': 0}, 

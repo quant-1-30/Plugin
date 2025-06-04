@@ -99,7 +99,6 @@ class Stock(BaseSpider):
                 return
                 
             diff = content['data'].get('diff', {})
-            self.logger.info(f"Found {len(diff)} items in response")
             
             if not diff:
                 self.logger.warning("No data found in response")
@@ -111,7 +110,6 @@ class Stock(BaseSpider):
                 asset.add_value('sid', obj['f12'])
                 asset.add_value('name', obj['f14'])
                 asset.add_value('first_trading', obj['f26'])
-                    
                 item = asset.load_item()
                 yield item
             
