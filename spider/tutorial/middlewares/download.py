@@ -4,6 +4,8 @@
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 # useful for handling different item types with a single interface
 
+import random
+import base64
 import collections
 import logging
 import numpy as np
@@ -74,11 +76,9 @@ retry_logger = getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
+__all__ = ['HttpAuthMiddleware', 'UserAgentMiddleware', 'HttpProxyMiddleware', 'RedirectMiddleware', 'RetryMiddleware']
 
-# HttpCacheMiddlewareTV = TypeVar("HttpCacheMiddlewareTV", bound="HttpCacheMiddleware")
 
-
-# set proxy referer and so on
 class TutorialDownloaderMiddleware:
     # Not all methods need to be defined. If a method is not defined,
     # scrapy acts as if the downloader middleware does not modify the
@@ -179,21 +179,34 @@ class UserAgentMiddleware:
 
 
 class HttpProxyMiddleware:
-
-    def __init__(self, proxy):
-        self.proxy = proxy
+    """This middleware allows spiders to override the user_agent"""
+    def __init__(self, proxy_ip):
+        self.proxy_ip = proxy_ip
 
     @classmethod
     def from_crawler(cls, crawler):
-        obj = cls(crawler.settings['Proxy_IP'])
-        crawler.signals.connect(obj.spider_opened, signal=signals.spider_opened)
-        return obj
+        o = cls(crawler.settings['USER_PROXY_IP'])
+        crawler.signals.connect(o.spider_opened, signal=signals.spider_opened)
+        return o
 
     def spider_opened(self, spider):
-        self.proxy = getattr(spider, 'proxy', self.proxy)
+        self.proxy_ip = getattr(spider, 'USER_PROXY_IP', self.proxy_ip)
 
     def process_request(self, request, spider):
-        request.meta['proxy'] = np.random.choice(self.proxy)
+        proxy_entry = random.choice(self.proxy_ip)
+        spider.logger.info(f"Using proxy: {proxy_entry}")
+        if proxy_entry:
+            # 格式支持：
+            # - http://host:port
+            # - http://user:pass@host:port
+            if "@" in proxy_entry:
+                creds, address = proxy_entry.split("@")
+                user_pass = creds.split("://")[1]
+                encoded_user_pass = base64.b64encode(user_pass.encode("utf-8")).decode("utf-8")
+                request.headers['Proxy-Authorization'] = 'Basic ' + encoded_user_pass
+                request.meta['proxy'] = "http://" + address
+            else:
+                request.meta['proxy'] = proxy_entry
 
 
 class RedirectMiddleware:
@@ -202,6 +215,53 @@ class RedirectMiddleware:
         if response.status in getattr(spider, 'handle_httpstatus_list', []):
             return request
         return response
+
+
+class CustomRetryMiddleware:
+
+    # IOError is raised by the HttpCompression middleware when trying to
+    # decompress an empty response
+    EXCEPTIONS_TO_RETRY = (defer.TimeoutError, TimeoutError, DNSLookupError,
+                           ConnectionRefusedError, ConnectionDone, ConnectError,
+                           ConnectionLost, TCPTimedOutError, ResponseFailed,
+                           IOError, TunnelError)
+
+    def __init__(self, settings):
+        if not settings.getbool('RETRY_ENABLED'):
+            raise NotConfigured
+        self.max_retry_times = settings.getint('RETRY_TIMES')
+        self.retry_http_codes = set(int(x) for x in settings.getlist('RETRY_HTTP_CODES'))
+        self.priority_adjust = settings.getint('RETRY_PRIORITY_ADJUST')
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings)
+
+    def process_response(self, request, response, spider):
+        if request.meta.get('dont_retry', False):
+            return response
+        if response.status in self.retry_http_codes:
+            reason = response_status_message(response.status)
+            return self._retry(request, reason, spider) or response
+        return response
+
+    def process_exception(self, request, exception, spider):
+        if (
+            isinstance(exception, self.EXCEPTIONS_TO_RETRY)
+            and not request.meta.get('dont_retry', False)
+        ):
+            return self._retry(request, exception, spider)
+
+    def _retry(self, request, reason, spider):
+        max_retry_times = request.meta.get('max_retry_times', self.max_retry_times)
+        priority_adjust = request.meta.get('priority_adjust', self.priority_adjust)
+        return get_retry_request(
+            request,
+            reason=reason,
+            spider=spider,
+            max_retry_times=max_retry_times,
+            priority_adjust=priority_adjust,
+        )
 
 
 def get_retry_request(
@@ -257,10 +317,7 @@ def get_retry_request(
     settings = spider.crawler.settings
     stats = spider.crawler.stats
     retry_times = request.meta.get('retry_times', 0) + 1
-    if max_retry_times is None:
-        max_retry_times = request.meta.get('max_retry_times')
-        if max_retry_times is None:
-            max_retry_times = settings.getint('RETRY_TIMES')
+
     if retry_times <= max_retry_times:
         logger.debug(
             "Retrying %(request)s (failed %(retry_times)d times): %(reason)s",
@@ -268,8 +325,10 @@ def get_retry_request(
             extra={'spider': spider}
         )
         new_request = request.copy()
-        new_request.meta['retry_times'] = retry_times
         new_request.dont_filter = True
+        new_request.meta['retry_times'] = retry_times
+        new_request.meta['retry_delay'] = 2 ** retry_times  # exponential backoff
+
         if priority_adjust is None:
             priority_adjust = settings.getint('RETRY_PRIORITY_ADJUST')
         new_request.priority = request.priority + priority_adjust
@@ -291,164 +350,3 @@ def get_retry_request(
             extra={'spider': spider},
         )
         return None
-
-
-class RetryMiddleware:
-
-    # IOError is raised by the HttpCompression middleware when trying to
-    # decompress an empty response
-    EXCEPTIONS_TO_RETRY = (defer.TimeoutError, TimeoutError, DNSLookupError,
-                           ConnectionRefusedError, ConnectionDone, ConnectError,
-                           ConnectionLost, TCPTimedOutError, ResponseFailed,
-                           IOError, TunnelError)
-
-    def __init__(self, settings):
-        if not settings.getbool('RETRY_ENABLED'):
-            raise NotConfigured
-        self.max_retry_times = settings.getint('RETRY_TIMES')
-        self.retry_http_codes = set(int(x) for x in settings.getlist('RETRY_HTTP_CODES'))
-        self.priority_adjust = settings.getint('RETRY_PRIORITY_ADJUST')
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        return cls(crawler.settings)
-
-    def process_response(self, request, response, spider):
-        if request.meta.get('dont_retry', False):
-            return response
-        if response.status in self.retry_http_codes:
-            reason = response_status_message(response.status)
-            return self._retry(request, reason, spider) or response
-        return response
-
-    def process_exception(self, request, exception, spider):
-        if (
-            isinstance(exception, self.EXCEPTIONS_TO_RETRY)
-            and not request.meta.get('dont_retry', False)
-        ):
-            return self._retry(request, exception, spider)
-
-    def _retry(self, request, reason, spider):
-        max_retry_times = request.meta.get('max_retry_times', self.max_retry_times)
-        priority_adjust = request.meta.get('priority_adjust', self.priority_adjust)
-        return get_retry_request(
-            request,
-            reason=reason,
-            spider=spider,
-            max_retry_times=max_retry_times,
-            priority_adjust=priority_adjust,
-        )
-
-
-# filter response
-class TutorialSpiderMiddleware:
-    # Not all methods need to be defined. If a method is not defined,
-    # scrapy acts as if the spider middleware does not modify the
-    # passed objects.
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        # This method is used by Scrapy to create your spiders.
-        s = cls()
-        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
-        return s
-
-    def process_spider_input(self, response, spider):
-        # Called for each response that goes through the spider
-        # middleware and into the spider.
-
-        # Should return None or raise an exception.
-        return None
-
-    async def process_spider_output(self, response, result, spider):
-        # Called with the results returned from the Spider, after
-        # it has processed the response.
-
-        # Must return an iterable of Request, or item objects.
-        # result 可能是异步生成器（async generator），我们需要异步迭代
-        if isinstance(result, collections.AsyncIterable):
-            async for r in result:
-                yield r
-        else:
-            for r in result:
-                yield r
-
-    def process_spider_exception(self, response, exception, spider):
-        # Called when a spider or process_spider_input() method
-        # (from other spider middleware) raises an exception.
-
-        # Should return either None or an iterable of Request or item objects.
-        pass
-
-    def process_start_requests(self, start_requests, spider):
-        # Called with the start requests of the spider, and works
-        # similarly to the process_spider_output() method, except
-        # that it doesn't have a response associated.
-
-        # Must return only requests (not items).
-        for r in start_requests:
-            yield r
-
-    def spider_opened(self, spider):
-        spider.logger.info('Spider opened: %s' % spider.name)
-
-
-class ErrorSpiderMiddleware:
-    handle_httpstatus_list = [301, 302, 456, 500, 502, 503, 504, 522, 524, 408, 429]
-
-    async def process_spider_output(self, response, result, spider):
-        if response.status in self.handle_httpstatus_list:
-            spider.logger.error(f"Received error status {response.status} for {response.url}")
-            return
-        
-        async for item in result:
-            yield item
-
-
-class HttpError(IgnoreRequest):
-    """A non-200 response was filtered"""
-
-    def __init__(self, response, *args, **kwargs):
-        self.response = response
-        super().__init__(*args, **kwargs)
-
-
-class HttpErrorMiddleware:
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        return cls(crawler.settings)
-
-    def __init__(self, settings):
-        self.handle_httpstatus_all = settings.getbool('HTTPERROR_ALLOW_ALL')
-        self.handle_httpstatus_list = settings.getlist('HTTPERROR_ALLOWED_CODES')
-
-    def process_spider_input(self, response, spider):
-        if 200 <= response.status < 300:  # common case
-            return
-        meta = response.meta
-        if meta.get('handle_httpstatus_all', False):
-            return
-        if 'handle_httpstatus_list' in meta:
-            allowed_statuses = meta['handle_httpstatus_list']
-        elif self.handle_httpstatus_all:
-            return
-        else:
-            allowed_statuses = getattr(spider, 'handle_httpstatus_list', self.handle_httpstatus_list)
-        if response.status in allowed_statuses:
-            return
-        raise HttpError(response, 'Ignoring non-200 response')
-
-    def process_spider_exception(self, response, exception, spider):
-        if isinstance(exception, HttpError):
-            spider.crawler.stats.inc_value('httperror/response_ignored_count')
-            spider.crawler.stats.inc_value(
-                f'httperror/response_ignored_status_count/{response.status}'
-            )
-            logger.info(
-                "Ignoring response %(response)r: HTTP status code is not handled or not allowed",
-                {'response': response}, extra={'spider': spider},
-            )
-            return []
-
-

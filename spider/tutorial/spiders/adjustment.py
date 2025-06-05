@@ -32,18 +32,15 @@ class Adjustment(BaseSpider):
         "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
         "AUTOTHROTTLE_MAX_DELAY": np.random.randint(20, 30),
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 1,
-        'DOWNLOAD_DELAY': np.random.randint(10, 20),  # Example setting: delay between requests
+        'DOWNLOAD_DELAY': np.random.randint(5, 10),  # Example setting: delay between requests
         'CONCURRENT_REQUESTS': 1,  # Example setting: number of concurrent requests
-        # retry
-        "RETRY_ENABLED": True,
-        "RETRY_TIMES": 5,
-        "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408, 429],
-        "HTTPERROR_ALLOWED_CODES": [301, 302],  # 避免对这些状态报错
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed
         # Middleware settings
         "DOWNLOADER_MIDDLEWARES": {
-            'tutorial.middlewares.UserAgentMiddleware': 400,
+            'tutorial.middlewares.HttpProxyMiddleware': 100,
+            'tutorial.middlewares.UserAgentMiddleware': 200,
+            'tutorial.middlewares.CustomRetryMiddleware': 300,
         },
         "ITEM_PIPELINES": {
             'tutorial.pipelines.Adjustment': 400,
@@ -73,23 +70,20 @@ class Adjustment(BaseSpider):
                   'pz': 50}
         start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
         yield scrapy.Request(start_url, callback=self.parse, 
-                             meta={'page': 1, 'params': params, 'retry_count': 0}, 
+                             meta={'page': 1, 'params': params, 'retry_times': 0}, 
                              errback=self.errback_httpbin,
                              dont_filter=True)
         
     def parse(self, response, **kwargs):
         self.logger.info(f"Response headers: {response.headers} url: {response.url} and status: {response.status}")
         meta = response.meta
-        meta['retry_count'] = 0
+
+        content = self._extract_json_with_retry(response)
+        if isinstance(content, scrapy.Request):
+            yield content
+            return
+
         try:
-            # 检查响应是否被压缩
-            body = (
-                gzip.decompress(response.body)
-                if response.headers.get('Content-Encoding') == b'gzip'
-                else response.body
-            )
-            # content
-            content = json.loads(body)
             diff = content['data'].get('diff', {})
             if not diff:
                 return 
@@ -108,34 +102,36 @@ class Adjustment(BaseSpider):
                 # start_url = self.routers['adjustment'] + urlencode(_params, quote_via=quote, safe='()')
                 start_url = self.routers['adjustment'] + urlencode(_params, quote_via=quote)
                 self.logger.info(f"Start url: {start_url}")
-                yield scrapy.Request(url=start_url, meta=meta.copy(), dont_filter=True, 
-                                     callback=self._decode, 
-                                     errback=self.errback_httpbin)
+
+                yield scrapy.Request(url=start_url,
+                                      meta=meta.copy(), 
+                                      dont_filter=True, 
+                                      callback=self._decode, 
+                                      errback=self.errback_httpbin)
             # next stock page
             params = meta['params']
             meta['page'] += 1
             params['pn'] = meta['page']
             next_url = self.routers['assets'] + urlencode(params, quote_via=quote)
-            yield scrapy.Request(next_url, callback=self.parse, 
-                                 meta={'page': meta['page'], 'params': params}, dont_filter=True)
+
+            yield scrapy.Request(next_url, 
+                                 callback=self.parse, 
+                                 meta={'page': meta['page'], 'params': params}, 
+                                 dont_filter=True)
         except Exception as e:
-            self.logger.error(f"Unexpected error in parse: {e}")
-            # Retry on unexpected errors
-            yield self._retry_request(response)
+            self.logger.error(f"解析响应失败: {e}, url: {response.url}")
 
     def _decode(self, response, **kwargs):
         self.logger.info(f"Response headers: {response.headers} url: {response.url} and status: {response.status}")
+        
+        content = self._extract_json_with_retry(response)
+        if isinstance(content, scrapy.Request):
+            yield content
+            return
+
         try:
-            # 检查响应是否被压缩
-            body = (
-                gzip.decompress(response.body)
-                if response.headers.get('Content-Encoding') == b'gzip'
-                else response.body
-            )
-            # content
-            content = json.loads(body)
-            self.logger.info(f"Adjustment content: {content}")
             datas = content['result'].get('data', [])
+            self.logger.info(f"Adjustment content: {datas}")
             if not datas:
                 return 
     
@@ -153,5 +149,4 @@ class Adjustment(BaseSpider):
                 yield item
             
         except Exception as e:
-            self.logger.error(f"Unexpected error in parse: {e}")
-            yield self._retry_request(response)
+            self.logger.error(f"解析响应失败: {e}, url: {response.url}")

@@ -41,7 +41,9 @@ class Fund(BaseSpider):
         # Add more custom settings as needed
         # Middleware settings
         "DOWNLOADER_MIDDLEWARES": {
-            'tutorial.middlewares.UserAgentMiddleware': 400,
+            'tutorial.middlewares.HttpProxyMiddleware': 100,
+            'tutorial.middlewares.UserAgentMiddleware': 200,
+            'tutorial.middlewares.CustomRetryMiddleware': 300,
         },
         "ITEM_PIPELINES": {
             'tutorial.pipelines.Asset': 400,
@@ -76,21 +78,19 @@ class Fund(BaseSpider):
                   'pz': 100}
         start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
         yield scrapy.Request(start_url, callback=self.parse, 
-                             meta={'page': 1, 'params': params, 'retry_count': 0}, 
+                             meta={'page': 1, 'params': params, 'retry_times': 0}, 
                              errback=self.errback_httpbin,
                              dont_filter=True)
 
     def parse(self, response, **kwargs):
         self.logger.info(f"Response headers: {response.headers} url: {response.url} and status: {response.status}")
+        
+        content = self._extract_json_with_retry(response)
+        if isinstance(content, scrapy.Request):
+            yield content
+            return
+        
         try:
-            # 检查响应是否被压缩
-            body = (
-                gzip.decompress(response.body)
-                if response.headers.get('Content-Encoding') == b'gzip'
-                else response.body
-            )
-            # content
-            content = json.loads(body)
             diff = content['data'].get('diff', {})
             if not diff:
                 return
@@ -111,9 +111,8 @@ class Fund(BaseSpider):
             params['pn'] = meta['page']
             next_url = self.routers['assets'] + urlencode(params, quote_via=quote)
             yield scrapy.Request(next_url, callback=self.parse, 
-                                 meta={'page': meta['page'], 'params': params, 'retry_count': 0}, 
+                                 meta={'page': meta['page'], 'params': params, 'retry_times': 0}, 
                                  errback=self.errback_httpbin,
                                  dont_filter=True)
         except Exception as e:
-            self.logger.error(f"Unexpected error in parse: {e}")
-            return self._retry_request(response)
+            self.logger.error(f"解析响应失败: {e}, url: {response.url}")

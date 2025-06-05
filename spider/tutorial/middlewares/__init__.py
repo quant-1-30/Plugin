@@ -1,3 +1,3 @@
-from .middlewares import *
+from .download import *
+from .spider import *
 
-__all__ = ['TutorialDownloaderMiddleware', 'HttpAuthMiddleware', 'UserAgentMiddleware', 'HttpProxyMiddleware', 'RedirectMiddleware', 'RetryMiddleware', 'TutorialSpiderMiddleware', 'ErrorSpiderMiddleware', 'HttpErrorMiddleware']

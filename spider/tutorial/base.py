@@ -5,9 +5,12 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
-import time
+import json
+import gzip
 import scrapy
 from scrapy.spiders import Spider
+from scrapy.utils.response import get_retry_request
+from scrapy.exceptions import IgnoreRequest
 
 
 class BaseSpider(Spider):
@@ -26,33 +29,57 @@ class BaseSpider(Spider):
         routers = crawler.settings.get('META_URLS')
         spider.routers = routers
         return spider
-
-    def _retry_request(self, response):
-        """Helper method to retry failed requests"""
-        meta = response.meta
-        retry_count = meta.get('retry_count', 0)
-        max_retries = 3  # Maximum number of retries
-
-        if retry_count < max_retries:
-            self.logger.info(f"Retrying request {response.url} (attempt {retry_count + 1}/{max_retries})")
-            meta['retry_count'] = retry_count + 1
-            time.sleep(2 ** retry_count)
-            return scrapy.Request(
-                response.url,
-                callback=self.parse,
-                meta=meta,
-                errback=self.errback_httpbin,
-                dont_filter=True
+    
+    def _extract_json_with_retry(self, response):
+        # parse failure also need to retry --- return request
+        try:
+            body = (
+                gzip.decompress(response.body)
+                if response.headers.get('Content-Encoding') == b'gzip'
+                else response.body
             )
-        else:
-            self.logger.error(f"Max retries ({max_retries}) exceeded for {response.url}")
-            return None
+            return json.loads(body)
+        except Exception as e:
+            self.logger.warning(f"[extract_json] JSON解析失败 尝试重试: {e} | URL: {response.url}")
+            retry_req = get_retry_request(
+                request=response.request,
+                reason=f"extract_json_failed: {e}",
+                spider=self
+            )
+            if retry_req:
+                return retry_req  # ⚠️ 会在 Spider 方法中判断这个返回是否为 Request
+            else:
+                self.logger.error(f"[extract_json] 达到最大重试次数，放弃请求: {response.url}")
+                raise IgnoreRequest(f"放弃请求: {response.url}")
+
 
     def errback_httpbin(self, failure):
-        """Handle request failures"""
+        """
+        errback callback for failed requests.
+
+        This gets triggered when requests raise exceptions such as:
+        - TimeoutError
+        - DNSLookupError
+        - ConnectionRefusedError
+        - etc.
+        """
         request = failure.request
-        self.logger.error(f"Request failed: {request.url} - {failure.value}")
-        
-        # Retry the request
-        return self._retry_request(request)
+
+        # 记录错误日志
+        self.logger.error(f"[Error] Request failed: {request.url}")
+        self.logger.error(f"[Error] Failure type: {failure.type.__name__}")
+        self.logger.error(f"[Error] Reason: {repr(failure.value)}")
+
+        # 如果你已经设置了 RetryMiddleware，会自动调用 RetryMiddleware.process_exception
+        # 所以你可以选择什么都不做，也可以记录/计数/告警
+
+        # # 但如果你想自定义 retry，也可以显式调用 _retry：
+        # if hasattr(self, '_retry_request'):
+        #     retry_req = self._retry(failure, failure.value)
+        #     if retry_req:
+        #         return retry_req
+
+        # 否则可以标记失败，用于统计或通知
+        self.logger.warning(f"[Fail] Giving up on {request.url} after failure.")
+
     
