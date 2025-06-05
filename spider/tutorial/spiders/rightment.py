@@ -5,13 +5,11 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
-import datetime
-import gzip
 import numpy as np
 import scrapy
-import json
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
+from datetime import datetime
 
 from tutorial.items import Right
 from tutorial.base import BaseSpider
@@ -85,6 +83,7 @@ class Rightment(BaseSpider):
         
         try:
             diff = content['data'].get('diff', {})
+            self.logger.info(f"Rightment content: {diff}")
             if not diff:
                 return
             

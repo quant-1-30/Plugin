@@ -9,8 +9,8 @@ import json
 import gzip
 import scrapy
 from scrapy.spiders import Spider
-from scrapy.utils.response import get_retry_request
 from scrapy.exceptions import IgnoreRequest
+from tutorial.utils.tools import get_retry_request
 
 
 class BaseSpider(Spider):

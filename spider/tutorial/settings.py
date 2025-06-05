@@ -18,6 +18,10 @@ import datetime
 
 BOT_NAME = 'backtest'
 
+# Obey robots.txt rules
+ROBOTSTXT_OBEY = False
+ROBOTSTXT_OBEY = False
+
 # 添加异步支持
 TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
 
@@ -40,11 +44,32 @@ POSTGRES_BATCH_SIZE = 100
 POSTGRES_RETRY = 3
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
-# USER_AGENT = 'test'
+USER_AGENT = ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15'
+              '(KHTML, like Gecko) Version/13.1.2 Safari/605.1.15',
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36',
+              'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36']
 
-# Obey robots.txt rules
-ROBOTSTXT_OBEY = False
+# Override the default request headers:
+DEFAULT_REQUEST_HEADERS = {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Encoding': 'gzip, deflate',
+          'Accept-Language': 'zh-CN,zh;q=0.9, en',
+          'Connection': 'keep-alive'}
 
+# proxy
+USER_PROXY_IP = ['http://mylh05w9:mylh05w9@49.67.73.93:2018',
+            'http://mylh05w8:mylh05w8@218.93.9.13:2021',
+            'http://mylh05w7:mylh05w7@180.97.244.253:2018',
+            'http://mylh05w6:mylh05w6@36.150.45.208:2018',
+            'http://mylh05w5:mylh05w5@221.229.107.77:2018',
+            'http://mylh05w4:mylh05w4@117.62.237.178:2729',
+            'http://mylh05w3:mylh05w3@121.229.44.134:8225',
+            'http://mylh05w2:mylh05w2@101.89.216.66:110',
+            'http://mylh05w1:mylh05w1@60.190.234.153:2018']
+
+HTTPPROXY_ENABLED = True
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
@@ -61,24 +86,6 @@ COOKIES_DEBUG = False
 # Disable Telnet Console (enabled by default)
 TELNETCONSOLE_ENABLED = False
 
-# Override the default request headers:
-DEFAULT_REQUEST_HEADERS = {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Encoding': 'gzip, deflate',
-          'Accept-Language': 'zh-CN,zh;q=0.9, en',
-          'Connection': 'keep-alive'}
-
-# user_agents
-USER_AGENT = ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15'
-              '(KHTML, like Gecko) Version/13.1.2 Safari/605.1.15',
-              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_3) AppleWebKit/537.36 '
-              '(KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36',
-              'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 '
-              '(KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36']
-
-# proxy
-HTTPPROXY_ENABLED = False
-
 # redirect 301 302
 REDIRECT_ENABLED = False
 REDIRECT_MAX_TIMES = 1
@@ -91,9 +98,10 @@ DOWNLOADER_STATS = True
 
 # Configure retryMiddle
 RETRY_ENABLED = True
-RETRY_TIMES = 1
+RETRY_TIMES = 5
 RETRY_HTTP_CODES = [408, 429, 456, 500, 502, 503, 504, 522, 524]
-
+# delay to process
+RETRY_PRIORITY_ADJUST = -1
 
 # Enable or disable downloader middlewares
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
@@ -104,7 +112,6 @@ DOWNLOADER_MIDDLEWARES = {
     'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': None,
     'scrapy.downloadermiddlewares.stats.DownloaderStats': None,
 }
-
 
 # RFC2616 policy --- This policy provides a RFC2616 compliant HTTP cache, i.e. with HTTP Cache-Control awareness,
 # aimed at production and used in continuous runs to avoid downloading unmodified data (to save bandwidth and speed up)
@@ -120,56 +127,16 @@ SPIDER_MIDDLEWARES = {
     'scrapy.spidermiddlewares.referer.RefererMiddleware': None,
     'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware': None,
     'scrapy.spidermiddlewares.depth.DepthMiddleware': None,
-    'tutorial.middlewares.ErrorSpiderMiddleware': 50,
+    'tutorial.middlewares.ErrorSpiderMiddleware': 500,
 }
-
-# SPIDER_MIDDLEWARES_BASE = {
-#     'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': 50,
-#     'scrapy.spidermiddlewares.offsite.OffsiteMiddleware': 500,
-#     'scrapy.spidermiddlewares.referer.RefererMiddleware': 700,
-#     'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware': 800,
-#     'scrapy.spidermiddlewares.depth.DepthMiddleware': 900,
-# }
-
-# Enable or disable spider middlewares
-# DOWNLOADER_MIDDLEWARES_BASE = {
-#     'scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware': 100,
-#     'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware': 300,
-#     'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware': 350,
-#     'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware': 400,
-#     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': 500,
-#     'scrapy.downloadermiddlewares.retry.RetryMiddleware': 550,
-#     'scrapy.downloadermiddlewares.ajaxcrawl.AjaxCrawlMiddleware': 560,
-#     'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware': 580,
-#     'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': 590,
-#     'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': 600,
-#     'scrapy.downloadermiddlewares.cookies.CookiesMiddleware': 700,
-#     'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware': 750,
-#     'scrapy.downloadermiddlewares.stats.DownloaderStats': 850,
-#     'scrapy.downloadermiddlewares.httpcache.HttpCacheMiddleware': 900,
-# }
-
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
-
 EXTENSIONS = {
    'scrapy.extensions.logstats.LogStats': None,
    'tutorial.extensions.StatsMailer': None,
    'tutorial.extensions.CoreStats': 0,
 }
-
-# EXTENSIONS_BASE = {
-#     'scrapy.extensions.corestats.CoreStats': 0,
-#     'scrapy.extensions.telnet.TelnetConsole': 0,
-#     'scrapy.extensions.memusage.MemoryUsage': 0,
-#     'scrapy.extensions.memdebug.MemoryDebugger': 0,
-#     'scrapy.extensions.closespider.CloseSpider': 0,
-#     'scrapy.extensions.feedexport.FeedExporter': 0,
-#     'scrapy.extensions.logstats.LogStats': 0,
-#     'scrapy.extensions.spiderstate.SpiderState': 0,
-#     'scrapy.extensions.throttle.AutoThrottle': 0,
-# }
 
 # Configure item pipelines
 # https://docs.scrapy.org/en/latest/topics/item-pipeline.html
@@ -222,27 +189,47 @@ MAIL_SSL = True
 # MAIL_SSL = False
 STATSMAILER_RCPTS = ['13776668123@163.com']
 
-# router 由于内部定义的keys才可以从from_crawler获取 , 全局配置; 找一个无关紧要的配置项
+# SPIDER_MIDDLEWARES_BASE = {
+#     'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': 50,
+#     'scrapy.spidermiddlewares.offsite.OffsiteMiddleware': 500,
+#     'scrapy.spidermiddlewares.referer.RefererMiddleware': 700,
+#     'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware': 800,
+#     'scrapy.spidermiddlewares.depth.DepthMiddleware': 900,
+# }
+
+# # Enable or disable spider middlewares default
+# DOWNLOADER_MIDDLEWARES_BASE = {
+#     'scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware': 100,
+#     'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware': None,
+#     'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware': None,
+#     'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware': None,
+#     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
+#     'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,
+#     'scrapy.downloadermiddlewares.ajaxcrawl.AjaxCrawlMiddleware': None,
+#     'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware': None,
+#     'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': None,
+#     'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': None,
+#     'scrapy.downloadermiddlewares.cookies.CookiesMiddleware': None,
+#     'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware': None,
+#     'scrapy.downloadermiddlewares.stats.DownloaderStats': None,
+#     'scrapy.downloadermiddlewares.httpcache.HttpCacheMiddleware': None,
+# }
+
+# EXTENSIONS_BASE = {
+#     'scrapy.extensions.corestats.CoreStats': 0,
+#     'scrapy.extensions.telnet.TelnetConsole': 0,
+#     'scrapy.extensions.memusage.MemoryUsage': 0,
+#     'scrapy.extensions.memdebug.MemoryDebugger': 0,
+#     'scrapy.extensions.closespider.CloseSpider': 0,
+#     'scrapy.extensions.feedexport.FeedExporter': 0,
+#     'scrapy.extensions.logstats.LogStats': 0,
+#     'scrapy.extensions.spiderstate.SpiderState': 0,
+#     'scrapy.extensions.throttle.AutoThrottle': 0,
+# }
+
 META_URLS = {
            'assets': 'http://push2.eastmoney.com/api/qt/clist/get?',
            'rightment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
            'adjustment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
-         #   'kline': 'http://push2his.eastmoney.com/api/qt/stock/kline/get?',
-         #   'bond': 'http://dcfm.eastmoney.com/em_mutisvcexpandinterface/api/js/get?',
            'aspects': 'http://finance.sina.com.cn/realstock/company/%s/nc.shtml', # sina finance xpath
            }
-
-
-# https://datacenter-web.eastmoney.com/api/data/v1/get?&sortColumns=REPORT_DATE&sortTypes=-1&pageSize=50&pageNumber=1&reportName=RPT_SHAREBONUS_DET&columns=ALL&filter=(SECURITY_CODE%3D%22600502%22)
-
-
-# https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_IPO_ALLOTMENT&columns=ALL&quoteType=0&sortColumns=FIRST_NOTICE_DATE&sortTypes=-1&filter=(SECURITY_CODE%3D600036)
-
-
-# # kline
-Params = {'fields1': 'f1\x2Cf2\x2Cf3\x2Cf4\x2Cf5\x2Cf6',
-          'fields2': 'f51\x2Cf52\x2Cf53\x2Cf54\x2Cf55\x2Cf56\x2Cf57\x2Cf58\x2Cf59\x2Cf60\x2Cf61',
-          'klt': 101,
-          'fqt': 0,
-          'start': 20040101,
-          'end': 20500101}
