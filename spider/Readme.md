@@ -117,3 +117,5 @@ Deferred.addCallback / addErrback
 alter table rightment alter column report_date set not null;
 alter table rightment drop constraint uq_sid_ex_date_rightment;
 alter table rightment add constraint uq_sid_report_date_rightment unique (sid, report_date);
+
+# adjustment update logic 2025-06-07 

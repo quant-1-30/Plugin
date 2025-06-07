@@ -86,14 +86,14 @@ class Rightment(BaseSpider):
         
         result = content['result']
         if not result or not result.get('data'):
-            self.logger.info(f"No rightment data found for date (filter: {meta['params']['filter']})")
+            self.logger.info(f"No rightment data found for {result}")
             
             # 检查响应结构以帮助调试
             if result:
-                self.logger.debug(f"Result keys for {meta['params']['filter']}: {list(result.keys())}")
+                self.logger.debug(f"Result keys for {list(result.keys())}")
                 self.logger.debug(f"Total pages info: {result.get('pages', 'N/A')}")
             else:
-                self.logger.warning(f"Empty result for {meta['params']['filter']}")
+                self.logger.warning(f"Empty result")
             return
             
         datas = content['result'].get('data', [])
