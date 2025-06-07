@@ -113,6 +113,7 @@ class Rightment(Pipeline):
             return
 
         item["sid"] = item["sid"].split('.')[0]
+        item['report_date'] = int(datetime.strptime(item['report_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
         item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
         
         register_date = item.get("register_date", 0)

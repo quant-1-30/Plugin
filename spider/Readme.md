@@ -113,3 +113,7 @@ smtpssl (bool) – enforce using a secure SSL connection
 
 Deferred 是 Twisted 框架的核心概念之一，它提供了一种优雅的方式来处理异步操作，特别是在像 Scrapy 这样的事件驱动框架中
 Deferred.addCallback / addErrback
+
+alter table rightment alter column report_date set not null;
+alter table rightment drop constraint uq_sid_ex_date_rightment;
+alter table rightment add constraint uq_sid_report_date_rightment unique (sid, report_date);

@@ -77,7 +77,7 @@ class Stock(BaseSpider):
         params = {'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23',
                   'fields': 'f12,f14,f26',
                   'pn': 1,
-                  'pz': 100} # 10000
+                  'pz': 50} # 10000
         start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
         self.logger.info(f"Requesting URL: {start_url}")
         yield scrapy.Request(start_url, callback=self.parse, 
@@ -93,37 +93,33 @@ class Stock(BaseSpider):
             yield content
             return
         
-        try:
-            if 'data' not in content:
-                self.logger.error(f"No 'data' field in content")
-                return
-                
-            diff = content['data'].get('diff', {})
-            if not diff:
-                self.logger.warning("No data found in response")
-                return
+        if not content or not content.get('data'):
+            self.logger.warning("No data found in response")
+            return
+        
+        diff = content['data'].get('diff', {})
+        if not diff:
+            self.logger.warning("No diff found in response")
+            return
             
-            # set loader
-            for _, obj in diff.items():
-                asset = ItemLoader(item=AssetItem())
-                asset.add_value('sid', obj['f12'])
-                asset.add_value('name', obj['f14'])
-                asset.add_value('first_trading', obj['f26'])
-                item = asset.load_item()
-                yield item
+        # set loader
+        for _, obj in diff.items():
+            asset = ItemLoader(item=AssetItem())
+            asset.add_value('sid', obj['f12'])
+            asset.add_value('name', obj['f14'])
+            asset.add_value('first_trading', obj['f26'])
+            item = asset.load_item()
+            yield item
             
-            # next page
-            meta = response.meta
-            meta['page'] += 1
-            params = meta['params']
-            params['pn'] = meta['page']
-            next_url = self.routers['assets'] + urlencode(params, quote_via=quote)
-            self.logger.info(f"Requesting next page: {next_url}")
+        # next page
+        meta = response.meta
+        meta['page'] += 1
+        next_params = meta['params'].copy()
+        next_params['pn'] = meta['page']
+        next_url = self.routers['assets'] + urlencode(next_params, quote_via=quote)
+        self.logger.info(f"Requesting next page: {next_url}")
 
-            yield scrapy.Request(next_url, callback=self.parse, 
-                                 meta={'page': meta['page'], 'params': params, 'retry_times': 0}, 
-                                 errback=self.errback_httpbin,
-                                 dont_filter=True)
-
-        except Exception as e:
-            self.logger.error(f"解析响应失败: {e}, url: {response.url}")
+        yield scrapy.Request(next_url, callback=self.parse, 
+                             meta={'page': meta['page'], 'params': next_params, 'retry_times': 0}, 
+                             errback=self.errback_httpbin,
+                             dont_filter=True)

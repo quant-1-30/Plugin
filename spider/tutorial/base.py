@@ -7,7 +7,6 @@ Created on Tue Mar 12 15:37:47 2019
 """
 import json
 import gzip
-import scrapy
 from scrapy.spiders import Spider
 from scrapy.exceptions import IgnoreRequest
 from tutorial.utils.tools import get_retry_request
@@ -52,7 +51,6 @@ class BaseSpider(Spider):
                 self.logger.error(f"[extract_json] 达到最大重试次数，放弃请求: {response.url}")
                 raise IgnoreRequest(f"放弃请求: {response.url}")
 
-
     def errback_httpbin(self, failure):
         """
         errback callback for failed requests.
@@ -64,22 +62,10 @@ class BaseSpider(Spider):
         - etc.
         """
         request = failure.request
-
         # 记录错误日志
         self.logger.error(f"[Error] Request failed: {request.url}")
         self.logger.error(f"[Error] Failure type: {failure.type.__name__}")
         self.logger.error(f"[Error] Reason: {repr(failure.value)}")
 
         # 如果你已经设置了 RetryMiddleware，会自动调用 RetryMiddleware.process_exception
-        # 所以你可以选择什么都不做，也可以记录/计数/告警
-
-        # # 但如果你想自定义 retry，也可以显式调用 _retry：
-        # if hasattr(self, '_retry_request'):
-        #     retry_req = self._retry(failure, failure.value)
-        #     if retry_req:
-        #         return retry_req
-
-        # 否则可以标记失败，用于统计或通知
-        self.logger.warning(f"[Fail] Giving up on {request.url} after failure.")
-
-    
+        self.logger.warning(f"[Fail] Giving up on {request.url} after failure.") # 记录/计数/告警 标记失败，用于统计或通知

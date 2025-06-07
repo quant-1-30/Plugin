@@ -25,8 +25,8 @@ runner = CrawlerRunner(get_project_settings())
 @defer.inlineCallbacks
 def crawl():
     # yield runner.crawl(Stock)
-    # yield runner.crawl(Adjustment)
-    yield runner.crawl(Rightment)
+    yield runner.crawl(Adjustment)
+    # yield runner.crawl(Rightment)
     reactor.stop()
 
 

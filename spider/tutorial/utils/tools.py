@@ -5,6 +5,7 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
+from datetime import datetime
 from typing import Optional, Union
 from scrapy.http.request import Request
 from scrapy.spiders import Spider
@@ -18,6 +19,39 @@ def coerce_to_uint32(a, scaling_factor):
     maintain precision if supplied.
     """
     return (a * scaling_factor).round().astype('uint32')
+
+
+def quarter_date(sdate, fmt="%Y-%m-%d"):
+    """根据日期确定 dataset 路径"""
+    sdate = datetime.strptime(str(sdate), fmt)
+    edate = datetime.now()
+    dates = []
+    current_year = sdate.year
+    end_year = edate.year
+    
+    while current_year <= end_year:
+        # 3月31日
+        march_date = datetime(current_year, 3, 31)
+        if march_date <= edate:  # 只添加已经过去的日期
+            dates.append(march_date.strftime(fmt))
+
+        # 6月30日
+        june_date = datetime(current_year, 6, 30)
+        if june_date <= edate:  # 只添加已经过去的日期
+            dates.append(june_date.strftime(fmt))
+        
+        # 9月30日
+        sept_date = datetime(current_year, 9, 30)
+        if sept_date <= edate:  # 只添加已经过去的日期
+            dates.append(sept_date.strftime(fmt))
+        
+        # 12月31日
+        dec_date = datetime(current_year, 12, 31)
+        if dec_date <= edate:  # 只添加已经过去的日期
+            dates.append(dec_date.strftime(fmt))
+        
+        current_year += 1
+    return dates
 
 
 def get_retry_request(

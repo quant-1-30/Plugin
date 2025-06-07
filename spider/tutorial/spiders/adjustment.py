@@ -5,16 +5,16 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
-from datetime import datetime
-import numpy as np
-import gzip
 import scrapy
-import json
+import numpy as np
+from datetime import datetime
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
 
 from tutorial.items import Dividend
 from tutorial.base import BaseSpider
+from tutorial.utils.tools import quarter_date
+
 
 __all__ = ['Adjustment']
 
@@ -64,89 +64,78 @@ class Adjustment(BaseSpider):
     }
 
     async def start(self):
-        params = {'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23',
-                  'fields': 'f12,f14,f26',
-                  'pn': 1,
-                  'pz': 50}
-        start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
-        yield scrapy.Request(start_url, callback=self.parse, 
-                             meta={'page': 1, 'params': params, 'retry_times': 0}, 
-                             errback=self.errback_httpbin,
-                             dont_filter=True)
+        start_date = self.settings.get('START_DATE', '1990-01-01') 
+        base_params = {'sortColumns': 'REPORT_DATE',
+                       'sortTypes': -1,
+                       'pageSize': 50,
+                       'pageNumber': 1,
+                       'reportName': 'RPT_SHAREBONUS_DET',
+                       'columns': 'ALL'}
+
+        for report_date in quarter_date(start_date):
+            self.logger.info(f"Report date: {report_date}")
+            params = base_params.copy() # 日期创建独立的参数副本 由于 dict 是引用类类型
+            params['filter'] = f"(REPORT_DATE='{report_date}')"
+            # setup adjustment params
+            start_url = self.routers['adjustment'] + urlencode(params, quote_via=quote)
+            self.logger.info(f"Start url: {start_url}")
+            yield scrapy.Request(start_url, callback=self.parse, 
+                                 meta={'params': params},
+                                 errback=self.errback_httpbin,
+                                 dont_filter=True)
         
     def parse(self, response, **kwargs):
-        self.logger.info(f"Response headers: {response.headers} url: {response.url} and status: {response.status}")
+        self.logger.info(f"Response url: {response.url} and status: {response.status}")
         meta = response.meta
 
         content = self._extract_json_with_retry(response)
         if isinstance(content, scrapy.Request):
             yield content
             return
-
-        try:
-            diff = content['data'].get('diff', {})
-            if not diff:
-                return 
             
-            # setup adjustment params
-            _params = {'sortColumns': 'REPORT_DATE',
-                      'sortTypes': -1,
-                      'pageSize': 100,
-                      'pageNumber': 1,
-                      'reportName': 'RPT_SHAREBONUS_DET',
-                      'columns': 'ALL'}
+        self.logger.info(f"Adjustment content: {content}")
+        result = content['result']
+        if not result or not result.get('data'):
+            self.logger.info(f"No dividend data found for date (filter: {meta['params']['filter']})")
+            
+            # 检查响应结构以帮助调试
+            if result:
+                self.logger.debug(f"Result keys for {meta['params']['filter']}: {list(result.keys())}")
+                self.logger.debug(f"Total pages info: {result.get('pages', 'N/A')}")
+            else:
+                self.logger.warning(f"Empty result for {meta['params']['filter']}")
+            return
+              
+        # 记录找到的数据数量
+        data_count = len(result['data'])
+        report_date = meta.get('report_date', 'unknown date')
+        current_page = meta['params']['pageNumber']
+        self.logger.info(f"Found {data_count} dividend records for {report_date} (page {current_page})")
+        
+        for obj in result['data']:
+            adjustment = ItemLoader(item=Dividend())
+            adjustment.add_value('sid', obj['SECUCODE'])
+            adjustment.add_value('report_date', obj['REPORT_DATE'])
+            adjustment.add_value('register_date', obj['EQUITY_RECORD_DATE'])
+            adjustment.add_value('ex_date', obj['EX_DIVIDEND_DATE'])
+            adjustment.add_value('bonus_share', obj['BONUS_RATIO']) # 送股
+            adjustment.add_value('transfer', obj['IT_RATIO']) # 转股
+            adjustment.add_value('bonus', obj['PRETAX_BONUS_RMB']) # /10
+            item = adjustment.load_item()
+            self.logger.info(f"Yielding Adjustment item: {item}")
+            yield item
 
-            for _, obj in diff.items():
-                symbol = obj['f12']
-                _params["filter"] = f'(SECURITY_CODE="{symbol}")' 
-                # start_url = self.routers['adjustment'] + urlencode(_params, quote_via=quote, safe='()')
-                start_url = self.routers['adjustment'] + urlencode(_params, quote_via=quote)
-                self.logger.info(f"Start url: {start_url}")
-
-                yield scrapy.Request(url=start_url,
-                                      meta=meta.copy(), 
-                                      dont_filter=True, 
-                                      callback=self._decode, 
-                                      errback=self.errback_httpbin)
-            # next stock page
-            params = meta['params']
-            meta['page'] += 1
-            params['pn'] = meta['page']
-            next_url = self.routers['assets'] + urlencode(params, quote_via=quote)
-
+        # 检查分页信息
+        total_pages = result.get('pages', 1)
+        if current_page <= total_pages:
+            # 为下一页创建新的参数副本
+            next_params = meta['params'].copy()
+            next_params['pageNumber'] = current_page + 1
+            next_url = self.routers['adjustment'] + urlencode(next_params, quote_via=quote)
+            self.logger.info(f"Loading page {next_params['pageNumber']}/{total_pages} for {meta['params']['filter']}")
             yield scrapy.Request(next_url, 
                                  callback=self.parse, 
-                                 meta={'page': meta['page'], 'params': params}, 
+                                 meta={'params': next_params}, 
                                  dont_filter=True)
-        except Exception as e:
-            self.logger.error(f"解析响应失败: {e}, url: {response.url}")
-
-    def _decode(self, response, **kwargs):
-        self.logger.info(f"Response headers: {response.headers} url: {response.url} and status: {response.status}")
-        
-        content = self._extract_json_with_retry(response)
-        if isinstance(content, scrapy.Request):
-            yield content
-            return
-
-        try:
-            datas = content['result'].get('data', [])
-            self.logger.info(f"Adjustment content: {datas}")
-            if not datas:
-                return 
-    
-            for obj in datas:
-                adjustment = ItemLoader(item=Dividend())
-                adjustment.add_value('sid', obj['SECUCODE'])
-                adjustment.add_value('report_date', obj['REPORT_DATE'])
-                adjustment.add_value('register_date', obj['EQUITY_RECORD_DATE'])
-                adjustment.add_value('ex_date', obj['EX_DIVIDEND_DATE'])
-                adjustment.add_value('bonus_share', obj['BONUS_RATIO']) # 送股
-                adjustment.add_value('transfer', obj['IT_RATIO']) # 转股
-                adjustment.add_value('bonus', obj['PRETAX_BONUS_RMB']) # /10
-                item = adjustment.load_item()
-                self.logger.info(f"Yielding Adjustment item: {item}")
-                yield item
-            
-        except Exception as e:
-            self.logger.error(f"解析响应失败: {e}, url: {response.url}")
+        else:
+            self.logger.info(f"Completed all {total_pages} pages for {meta['params']['filter']}")
