@@ -6,11 +6,12 @@ Created on Tue Mar 12 15:37:47 2019
 @author: python
 """
 from datetime import datetime
+from logging import Logger
 from typing import Optional, Union
+
 from scrapy.http.request import Request
 from scrapy.spiders import Spider
 from scrapy.utils.python import global_object_name
-from logging import Logger
 
 
 def coerce_to_uint32(a, scaling_factor):

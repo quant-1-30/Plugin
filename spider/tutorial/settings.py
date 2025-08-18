@@ -143,7 +143,7 @@ EXTENSIONS = {
 ITEM_PIPELINES = {
    #  'tutorial.pipelines.BasicsPipeline': 300,
    #  'tutorial.pipelines.AlignPipeline': 400,
-    'tutorial.pipelines.AsyncDb': 500,
+    # 'tutorial.pipelines.AsyncDb': 500,
 }
 
 # Enable and configure the AutoThrottle extension (disabled by default)
@@ -229,6 +229,7 @@ STATSMAILER_RCPTS = ['13776668123@163.com']
 
 META_URLS = {
            'assets': 'http://push2.eastmoney.com/api/qt/clist/get?',
+           'index': 'https://push2his.eastmoney.com/api/qt/stock/kline/get?',
            'rightment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
            'adjustment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
            'aspects': 'http://finance.sina.com.cn/realstock/company/%s/nc.shtml', # sina finance xpath

@@ -119,3 +119,5 @@ alter table rightment drop constraint uq_sid_ex_date_rightment;
 alter table rightment add constraint uq_sid_report_date_rightment unique (sid, report_date);
 
 # adjustment update logic 2025-06-07 
+
+ Scrapy 的 FEEDS 设置保存数据，您需要确保返回的对象是 Scrapy 可以处理的类型（如字典或 Item 对象）

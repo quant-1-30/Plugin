@@ -7,6 +7,7 @@ Created on Tue Mar 12 15:37:47 2019
 """
 import json
 import gzip
+
 from scrapy.spiders import Spider
 from scrapy.exceptions import IgnoreRequest
 from tutorial.utils.tools import get_retry_request

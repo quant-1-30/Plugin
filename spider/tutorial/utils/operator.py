@@ -6,12 +6,11 @@ from sqlalchemy.orm import sessionmaker
 from contextlib import asynccontextmanager
 from sqlalchemy.sql import text
 
-from tutorial.meta import with_metaclass, MetaSingleton
 
 __all__ = ["async_ops"]
 
 
-class AsyncOps(with_metaclass(MetaSingleton, object)):
+class AsyncOps(object):
     """Local provider class
     It is a set of interface that allow users to access data.
     Because PITD is not exposed publicly to users, so it is not included in the interface.
@@ -24,11 +23,11 @@ class AsyncOps(with_metaclass(MetaSingleton, object)):
         self.engine = None
         self.session = None
 
-    async def __aenter__(self):
-        await self.initialize()
+    async def __aenter__(self, crawler=None):
+        await self.initialize(crawler)
         return self
     
-    async def initialize(self, crawler=None):
+    async def initialize(self, crawler):
         """Async initialization method"""
         if self._initialized:
             return

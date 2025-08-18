@@ -212,6 +212,15 @@ class AsyncDb(Pipeline):
             await ops.on_insert(sql, item)
 
 
+class CsvWriter(Pipeline):
+    def __init__(self, filename):
+        self.filename = filename
+        self.file = open(filename, 'w')
+        
+    def process_item(self, item, spider):
+        self.file.write(item)
+
+
 class HDF5Writer(Pipeline):
     """
     Class capable of writing daily OHLCV data to disk in a format that

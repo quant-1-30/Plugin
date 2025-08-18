@@ -27,49 +27,19 @@ class AssetItem(Item):
     first_trading = Field()
 
 
-# 可转债信息
-class BondItem(Item):
-
-    # 债券代码
-    sid = Field()
-    # 中文
-    name = Field()
-    # 正股代码
-    swap_code = Field()
-    # 转股价
-    swap_price = Field()
-    # 转股开始日期
-    swap_sdate = Field()
-    # 转股结束日期
-    swap_edate = Field()
-
-
-class DualItem(Item):
-
-    # sid
-    sid = Field()
-    # name
-    name = Field()
-    # hk code
-    dual = Field()
-
-
-class BasicsItem(Item):
-
+class KlineItem(Item):
     # 代码
     sid = Field()
-    # 公司名称
-    name = Field()
-    # 上市市场
-    market = Field()
-    # 上市日期
-    ipo_date = Field()
-    # 发行价格
-    ipo_price = Field()
-    # 主承销商
-    broker = Field()
-    # 邮政编码
-    district_code = Field()
+    # 日期
+    date = Field()
+    # 开盘价
+    open = Field()
+    # 收盘价
+    close = Field()
+    # 最高价
+    high = Field()
+    # 最低价
+    low = Field()
 
 
 class Dividend(Item):

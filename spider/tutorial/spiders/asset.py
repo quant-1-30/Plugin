@@ -5,27 +5,28 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
-import numpy as np
-import gzip
 import scrapy
 import json
-from scrapy.loader import ItemLoader
-from urllib.parse import urlencode, quote
+import gzip
+import numpy as np
+
 from datetime import datetime
+from urllib.parse import urlencode, quote
+from scrapy.loader import ItemLoader
 
-from tutorial.items import BondItem
-from tutorial.base import BaseSpider
+from tutorial.pipelines.items import AssetItem
+from tutorial.spiders.base import BaseSpider
 
-__all__ = ['Bond']
+__all__ = ['Stock']
 
 
-class Bond(BaseSpider):
-    """
-        回售最后2年70%, 赎回130%  type=KZZ_HSSH
-    """
-    name = 'bond'
-    allowed_domains = ['dcfm.eastmoney.com', 'push2his.eastmoney.com']
+class Stock(BaseSpider):
 
+    name = 'stock'
+    table_name = "asset"
+    allowed_domains = ['push2.eastmoney.com', 'finance.sina.com.cn', 'push2his.eastmoney.com']
+    handle_httpstatus_list = [301, 302]
+    
     custom_settings = {
         "AUTOTHROTTLE_ENABLED": True,
         "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
@@ -50,18 +51,18 @@ class Bond(BaseSpider):
             'tutorial.pipelines.Asset': 400,
             'tutorial.pipelines.AsyncDb': 500,
         },
-        "FEEDS": {
-            "feeds/rightment/%(name)s_%(time)s.json": {
-                "format": "json",
-                "encoding": "utf-8",
-                "indent": 4,
-            },
-        },
+        # "FEEDS": {
+        #     "feeds/stock/%(name)s_%(time)s.json": {
+        #         "format": "json",
+        #         "encoding": "utf-8",
+        #         "indent": 4,
+        #     },
+        # },
         # 日志配置
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
-        "LOG_FILE": "logs/bond_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
+        "LOG_FILE": "logs/stock_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
         "LOG_ENABLED": True,
         "LOG_STDOUT": True,  # 同时输出到控制台
         "LOG_SHORT_NAMES": True,  # 使用短名称
@@ -73,9 +74,13 @@ class Bond(BaseSpider):
     }
 
     async def start(self):
-        params = {'type': 'KZZ_MX',
-                  'token': '894050c76af8597a853f5b408b759f5d'}
-        start_url = self.routers['bond'] + urlencode(params, quote_via=quote)
+        self.logger.info("Starting stock spider...")
+        params = {'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23',
+                  'fields': 'f12,f14,f26',
+                  'pn': 1,
+                  'pz': 50} # 10000
+        start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
+        self.logger.info(f"Requesting URL: {start_url}")
         yield scrapy.Request(start_url, callback=self.parse, 
                              meta={'page': 1, 'params': params, 'retry_times': 0}, 
                              errback=self.errback_httpbin,
@@ -89,31 +94,33 @@ class Bond(BaseSpider):
             yield content
             return
         
-        try:
-            diff = content['data'].get('diff', {})
-            if not diff:
-                return
-    
-            for _, obj in diff.items():
-                bond = ItemLoader(item=BondItem())
-                bond.add_value('sid', obj['f12'])
-                bond.add_value('name', obj['f14'])
-                bond.add_value('swap_code', obj['f16'])
-                bond.add_value('swap_price', obj['f18'])
-                bond.add_value('swap_sdate', obj['f20'])
-                bond.add_value('swap_edate', obj['f22'])
-                item = bond.load_item()
-                yield item
+        if not content or not content.get('data'):
+            self.logger.warning("No data found in response")
+            return
+        
+        diff = content['data'].get('diff', {})
+        if not diff:
+            self.logger.warning("No diff found in response")
+            return
             
-            # next page
-            meta = response.meta
-            params = meta['params']
-            meta['page'] += 1
-            params['pn'] = meta['page']
-            next_url = self.routers['assets'] + urlencode(params, quote_via=quote)
-            yield scrapy.Request(next_url, callback=self.parse, 
-                                 meta={'page': meta['page'], 'params': params, 'retry_times': 0}, 
-                                 errback=self.errback_httpbin,
-                                 dont_filter=True)
-        except Exception as e:
-            self.logger.error(f"解析响应失败: {e}, url: {response.url}")
+        # set loader
+        for _, obj in diff.items():
+            asset = ItemLoader(item=AssetItem())
+            asset.add_value('sid', obj['f12'])
+            asset.add_value('name', obj['f14'])
+            asset.add_value('first_trading', obj['f26'])
+            item = asset.load_item()
+            yield item
+            
+        # next page
+        meta = response.meta
+        meta['page'] += 1
+        next_params = meta['params'].copy()
+        next_params['pn'] = meta['page']
+        next_url = self.routers['assets'] + urlencode(next_params, quote_via=quote)
+        self.logger.info(f"Requesting next page: {next_url}")
+
+        yield scrapy.Request(next_url, callback=self.parse, 
+                             meta={'page': meta['page'], 'params': next_params, 'retry_times': 0}, 
+                             errback=self.errback_httpbin,
+                             dont_filter=True)

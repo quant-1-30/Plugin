@@ -7,12 +7,13 @@ Created on Tue Mar 12 15:37:47 2019
 """
 import scrapy
 import numpy as np
+
 from datetime import datetime
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
 
-from tutorial.items import Dividend
-from tutorial.base import BaseSpider
+from tutorial.pipelines.items import Dividend
+from tutorial.spiders.base import BaseSpider
 from tutorial.utils.tools import quarter_date
 
 
@@ -74,7 +75,7 @@ class Adjustment(BaseSpider):
 
         for report_date in quarter_date(start_date):
             self.logger.info(f"Report date: {report_date}")
-            params = base_params.copy() # 日期创建独立的参数副本 由于 dict 是引用类类型
+            params = base_params.copy()
             params['filter'] = f"(REPORT_DATE='{report_date}')"
             # setup adjustment params
             start_url = self.routers['adjustment'] + urlencode(params, quote_via=quote)

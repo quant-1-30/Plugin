@@ -26,7 +26,8 @@ runner = CrawlerRunner(get_project_settings())
 def crawl():
     # yield runner.crawl(Stock)
     # yield runner.crawl(Adjustment)
-    yield runner.crawl(Rightment)
+    # yield runner.crawl(Rightment)
+    yield runner.crawl(Index)
     reactor.stop()
 
 

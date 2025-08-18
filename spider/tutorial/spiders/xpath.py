@@ -6,17 +6,18 @@ Created on Tue Mar 12 15:37:47 2019
 @author: python
 """
 import os
-import numpy as np
-import scrapy
 import json
+import scrapy
+import numpy as np
+
 from urllib.parse import urlencode, quote
 from scrapy import  Selector
 from scrapy.loader import ItemLoader
 # from itemadapter import is_item, ItemAdapter
 from itemloaders.processors import TakeFirst, MapCompose, Join
 
-from tutorial.items import *
-from tutorial.base import BaseSpider
+from tutorial.pipelines.items import *
+from tutorial.spiders.base import BaseSpider
 
 
 class Adjustment(BaseSpider):
