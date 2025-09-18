@@ -26,8 +26,8 @@ from collections import namedtuple
 from sqlalchemy import text
 from datetime import datetime
 
-from tutorial.utils.tools import coerce_to_uint32
-from tutorial.utils.operator import async_ops
+from utils.tools import coerce_to_uint32
+from utils.operator import async_ops
 
 __all__ = ['Asset', 'Basics', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
 

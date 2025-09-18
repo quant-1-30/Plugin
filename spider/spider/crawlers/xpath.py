@@ -16,8 +16,8 @@ from scrapy.loader import ItemLoader
 # from itemadapter import is_item, ItemAdapter
 from itemloaders.processors import TakeFirst, MapCompose, Join
 
-from tutorial.pipelines.items import *
-from tutorial.spiders.base import BaseSpider
+from pipelines.items import *
+from crawlers.base import BaseSpider
 
 
 class Adjustment(BaseSpider):

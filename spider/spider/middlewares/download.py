@@ -43,7 +43,7 @@ from scrapy.core.downloader.handlers.http11 import TunnelError
 from scrapy.exceptions import NotConfigured
 from scrapy.utils.response import response_status_message
 from w3lib.http import basic_auth_header
-from tutorial.utils.tools import get_retry_request
+from utils.tools import get_retry_request
 
 retry_logger = getLogger(__name__)
 

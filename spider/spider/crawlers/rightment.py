@@ -12,8 +12,8 @@ from datetime import datetime
 from scrapy.loader import ItemLoader
 from urllib.parse import urlencode, quote
 
-from tutorial.pipelines.items import Right
-from tutorial.spiders.base import BaseSpider
+from pipelines.items import Right
+from crawlers.base import BaseSpider
 
 __all__ = ['Rightment']
 

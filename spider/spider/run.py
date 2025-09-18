@@ -8,7 +8,7 @@ from scrapy.crawler import CrawlerRunner
 # from scrapy.crawler import CrawlerProcess
 from scrapy.utils.log import configure_logging
 from scrapy.utils.project import get_project_settings
-from tutorial.spiders import *
+from crawlers import *
 
 
 # configure_logging()
@@ -27,7 +27,7 @@ def crawl():
     # yield runner.crawl(Stock)
     # yield runner.crawl(Adjustment)
     # yield runner.crawl(Rightment)
-    yield runner.crawl(Index)
+    # yield runner.crawl(Index)
     reactor.stop()
 
 

@@ -10,7 +10,7 @@ import gzip
 
 from scrapy.spiders import Spider
 from scrapy.exceptions import IgnoreRequest
-from tutorial.utils.tools import get_retry_request
+from utils.tools import get_retry_request
 
 
 class BaseSpider(Spider):

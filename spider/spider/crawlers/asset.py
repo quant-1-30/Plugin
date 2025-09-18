@@ -14,8 +14,8 @@ from datetime import datetime
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
 
-from tutorial.pipelines.items import AssetItem
-from tutorial.spiders.base import BaseSpider
+from pipelines.items import AssetItem
+from crawlers.base import BaseSpider
 
 __all__ = ['Stock']
 

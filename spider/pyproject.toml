@@ -1,0 +1,42 @@
+[tool.poetry]
+name = "spider"
+version = "0.1.0"
+description = ""
+authors = ["hengxin.liu"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"  # 限定python version 避免 pkg 不兼容
+asyncpg = "^0.30.0"
+sqlalchemy = "^2.0.41"
+greenlet = "^3.2.2"
+incremental = "^24.7.2"
+typing-extensions = "^4.15.0"
+constantly = "^23.10.4"
+attrs = ">=20.0"
+w3lib = "^2.3.1"
+lxml = "^6.0.1"
+defusedxml = "^0.7.1"
+parsel = "^1.10.0"
+pyopenssl = "^25.3.0"
+cryptograpy = "^0.0.0"
+service-identity = "^24.2.0"
+pyasn1 = "^0.6.1"
+restrictedpython = "^8.0"
+accesscontrol = "^7.2"
+zope = "^5.13"
+scrapy = "2.11.0"
+pydispatch = "^1.1.0"
+numpy = "^2.3.3"
+h5py = "^3.14.0"
+pandas = "^2.3.2"
+toolz = "^1.0.0"
+
+[[tool.poetry.source]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple/"
+priority = "default" 
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

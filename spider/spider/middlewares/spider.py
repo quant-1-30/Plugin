@@ -4,11 +4,8 @@
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 # useful for handling different item types with a single interface
 
-import random
-import base64
 import collections
 import logging
-import numpy as np
 from scrapy.exceptions import IgnoreRequest
 
 from urllib.parse import unquote, urlunparse

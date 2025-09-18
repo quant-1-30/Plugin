@@ -12,9 +12,9 @@ from datetime import datetime
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
 
-from tutorial.pipelines.items import Dividend
-from tutorial.spiders.base import BaseSpider
-from tutorial.utils.tools import quarter_date
+from pipelines.items import Dividend
+from crawlers.base import BaseSpider
+from utils.tools import quarter_date
 
 
 __all__ = ['Adjustment']
