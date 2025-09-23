@@ -43,8 +43,8 @@ class Adjustment(BaseSpider):
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed override settings
         "ITEM_PIPELINES": {
-            'spider.tutorial.pipelines.Adjustment': 400,
-            'tutorial.pipelines.AsyncDb': 500,
+            'spider.pipelines.Adjustment': 400,
+            'spider.pipelines.AsyncDb': 500,
         },
         "FEEDS": {
             "feeds/adjustment/%(name)s_%(time)s.json": {
@@ -60,7 +60,7 @@ class Adjustment(BaseSpider):
                   'fields': 'f12,f14,f26',
                   'pn': 1,
                   'pz': 50000}
-        equity_url = self.routers['assets'] + urlencode(params, quote_via=quote)
+        equity_url = os.getenv("asset_url") + urlencode(params, quote_via=quote)
         yield scrapy.Request(equity_url, callback=self.parse, 
                              meta={'page': 1, 'params': params}, dont_filter=True)
    

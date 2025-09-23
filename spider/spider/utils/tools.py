@@ -33,22 +33,22 @@ def quarter_date(sdate, fmt="%Y-%m-%d"):
     while current_year <= end_year:
         # 3月31日
         march_date = datetime(current_year, 3, 31)
-        if march_date <= edate:  # 只添加已经过去的日期
+        if sdate <= march_date <= edate:  # 只添加已经过去的日期
             dates.append(march_date.strftime(fmt))
 
         # 6月30日
         june_date = datetime(current_year, 6, 30)
-        if june_date <= edate:  # 只添加已经过去的日期
+        if sdate <= june_date <= edate:  # 只添加已经过去的日期
             dates.append(june_date.strftime(fmt))
         
         # 9月30日
         sept_date = datetime(current_year, 9, 30)
-        if sept_date <= edate:  # 只添加已经过去的日期
+        if sdate <= sept_date <= edate:  # 只添加已经过去的日期
             dates.append(sept_date.strftime(fmt))
         
         # 12月31日
         dec_date = datetime(current_year, 12, 31)
-        if dec_date <= edate:  # 只添加已经过去的日期
+        if sdate <= dec_date <= edate:  # 只添加已经过去的日期
             dates.append(dec_date.strftime(fmt))
         
         current_year += 1

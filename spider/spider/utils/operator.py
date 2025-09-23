@@ -1,13 +1,19 @@
 # !/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
+import asyncio
+from twisted.internet import defer
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from contextlib import asynccontextmanager
-from sqlalchemy.sql import text
 
 
 __all__ = ["async_ops"]
+
 
 
 class AsyncOps(object):
@@ -16,52 +22,79 @@ class AsyncOps(object):
     Because PITD is not exposed publicly to users, so it is not included in the interface.
 
     To keep compatible with old qlib provider.
-    select and insert in seprate mode / begin used in insert / select just session is ok
     """
+    params = ()
+
     def __init__(self):
         self._initialized = False
         self.engine = None
-        self.session = None
 
-    async def __aenter__(self, crawler=None):
-        await self.initialize(crawler)
+    async def __aenter__(self):
+        await self._ensure_initialized()
         return self
     
-    async def initialize(self, crawler):
+    async def _async_initialize(self):
         """Async initialization method"""
         if self._initialized:
             return
-        await self._build_engine(crawler)
+        await self._build_engine()
         self._initialized = True
+    
+    async def _ensure_initialized(self):
+        """Helper method to ensure initialization"""
+        if not self._initialized:
+            await self._async_initialize()
 
-    async def _build_engine(self, crawler=None):
+    async def _build_engine(self):
         """
             a. create all tables
             b. reflect tables
             c. bug --- every restart service result scan model to recreate (rollback)
         """
-        if crawler:
-            url = f"postgresql+{crawler.settings.get('POSTGRES_ENGINE')}://{crawler.settings.get('POSTGRES_USER')}:{crawler.settings.get('POSTGRES_PASSWORD')}@{crawler.settings.get('POSTGRES_HOST')}:{crawler.settings.get('POSTGRES_PORT')}/{crawler.settings.get('POSTGRES_DB')}"
-            self.engine = create_async_engine(
-                url,
-                pool_size=crawler.settings.getint('POSTGRES_POOL_SIZE'),
-                max_overflow=crawler.settings.getint('POSTGRES_MAX_OVERFLOW'),
-                pool_recycle=crawler.settings.getint('POSTGRES_POOL_RECYCLE'),
-                pool_pre_ping=crawler.settings.getbool('POSTGRES_POOL_PRE_PING'),
-                echo=crawler.settings.getbool('POSTGRES_ECHO')
-            )
-        else:
-            # 使用默认配置
-            url = "postgresql+asyncpg://postgres:20210718@localhost:5432/bt_feed"
-            self.engine = create_async_engine(
-                url,
-                pool_size=20,
-                max_overflow=10,
-                pool_recycle=3600,
-                pool_pre_ping=True,
-                echo=True
-            )
+        # postgresql+psycopg2cffi://user:password@host:port/dbname[?key=value&key=value...]
+        # postgresql+psycopg2://me@localhost/mydb
+        # postgresql+asyncpg://me@localhost/mydb
+        url = f'postgresql+{os.getenv("PGENGINE")}://{os.getenv("PGUSER")}:{os.getenv("PGPWD")}@{os.getenv("PGHOST")}:{os.getenv("PGPORT")}/{os.getenv("PGDB")}'
+        engine = create_async_engine(url, 
+                               pool_size=int(os.getenv("PGPOOLSIZE")),
+                               pool_timeout=int(os.getenv("PGTIMEOUT")),
+                               max_overflow=int(os.getenv("PGMAXOVERFLOW")),
+                               pool_recycle=int(os.getenv("PGPOOLRECYCLE")), 
+                               pool_pre_ping=bool(int(os.getenv("PGPREPING"))),
+                               # isolation_level="AUTOCOMMIT"
+                               # stream_results = True/ False
+                               # autocommit = True/ False
+                               # compiled_cache = True/ False
+                               echo=bool(int(os.getenv("PGECHO")))).execution_options(compiled_cache={})
+        
+        self.engine = engine
 
+    @asynccontextmanager
+    async def get_db(self):
+        # 会话不应该作为实例变量保存
+        await self._ensure_initialized()                
+        AsyncSessionLocal = sessionmaker(
+            bind=self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+        session = AsyncSessionLocal()
+
+        try:
+            yield session
+            # await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+    
+    @staticmethod
+    def filter_valid_keys(base_obj, insert):
+        valid_keys = [column.name for column in base_obj.__table__.columns]
+        # 只设置模型中定义的字段
+        return {key: value for key, value in insert.items() if key in valid_keys}
+    
     async def reset_sequence(self, table_name):
         """重置表的自增序列"""
         async with self.get_db() as session:
@@ -77,35 +110,60 @@ class AsyncOps(object):
                     ALTER SEQUENCE {sequence_name} RESTART WITH 1
                 """))
                 await session.commit()
-
-    @asynccontextmanager
-    async def get_db(self):
-        if not self.session:
-            async_session = sessionmaker(
-                self.engine, class_=AsyncSession, expire_on_commit=False
-            )
-            self.session = async_session()
-        try:
-            yield self.session
-        finally:
-            await self.session.close()
-            self.session = None
     
-    async def on_query(self, query, params):
-        async with self.get_db() as session:
-            result = await session.execute(query, params)
-            return result.scalars().all()
+    @defer.inlineCallbacks
+    def on_query(self, query: str):
+        """使用 Scrapy 的 defer 机制"""
+        try:
+            from twisted.internet.threads import deferToThread
+            # 在线程中执行异步代码
+            results = yield deferToThread(self._run_async_query, query)
+            defer.returnValue(results)
+        except Exception as e:
+            print(f"查询错误: {e}")
+            defer.returnValue([])
 
-    async def on_insert(self, sql, params):
+    def _run_async_query(self, query: str):
+        async def async_wrapper():
+            async with self.get_db() as session:
+                if isinstance(query, str):
+                    query_obj = text(query)
+                # result = await session.execute(query_obj)
+                # return result.scalars().all()
+                # in asynchronous mode, the synchronous yield_per isn't directly applicable.  you can use the stream() method, which allows streaming query results asynchronously.
+                stream = await session.stream(query_obj)
+                # stream.scalars() return one field
+                results = []
+                async for row in stream:
+                    # print("result ", row)
+                    results.append(row)
+                return results
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(async_wrapper())
+        finally:
+            loop.close()
+
+    async def on_insert(self, sql:str, param:dict):
+        # await self._ensure_initialized()
         async with self.get_db() as session:
             async with session.begin():
-                await session.execute(sql, params)
+                await session.execute(sql, param)
+                await session.commit()
+
+    async def on_execute(self, query: str):
+        async with self.get_db() as session:
+            async with session.begin():
+                await session.execute(query)
                 await session.commit()
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        if exc_type is not None:
-            print(f"Error: {exc_type}, {exc_value}, {traceback}")
-        return True
+            if exc_type is not None:
+                print(f"Error: {exc_type}, {exc_value}, {traceback}")
+            # True mean suppress exception
+            return True
     
     async def cleanup(self):
         if self.engine:
@@ -113,27 +171,6 @@ class AsyncOps(object):
             self.engine = None
         self._initialized = False
 
+
 async_ops = AsyncOps()
 
-# def init_engine():
-#     # 在这里导入定义模型所需要的所有模块，这样它们就会正确的注册在
-#     # 元数据上。否则你就必须在调用 init_db() 之前导入它们, import --- 执行脚本
-#     # scoped_session 线程安全
-#     # from sqlalchemy.orm import sessionmaker, scoped_session
-#     # db_session = scoped_session(sessionmaker(autocommit=False,
-#     #                                          autoflush=False,
-#     #                                          bind=engine))
-#     # from sqlalchemy.ext.declarative import declarative_base
-#     # Base = declarative_base()
-#     # Base.query = db_session.query_property()
-#     # Base.metadata.create_all(bind=engine)
-#     engine_path = 'mysql+pymysql://{username}:{password}@{host}:{port}'.format(**MYSQL)
-#     eng = create_engine(engine_path, pool_size=MYSQL['pool_size'],
-#                         max_overflow=MYSQL['max_overflow'])
-#     create_str = "CREATE DATABASE IF NOT EXISTS %s ;" % MYSQL['db']
-#     eng.execute(create_str)
-#     eng.execute("use %s" % MYSQL['db'])
-#     # engine_path = 'mysql+pymysql://{username}:{password}@{host}:{port}/{db}'.format(**MYSQL)
-#     # eng = create_engine(engine_path, pool_size=MYSQL['pool_size'],
-#     #                     max_overflow=MYSQL['max_overflow'])
-#     return eng

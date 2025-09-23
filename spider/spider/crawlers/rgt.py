@@ -5,6 +5,7 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
+import os
 import scrapy
 import numpy as np
 
@@ -14,6 +15,7 @@ from urllib.parse import urlencode, quote
 
 from pipelines.items import Right
 from crawlers.base import BaseSpider
+from utils.operator import async_ops
 
 __all__ = ['Rightment']
 
@@ -37,21 +39,21 @@ class Rightment(BaseSpider):
         # Add more custom settings as needed
         # Middleware settings
         "DOWNLOADER_MIDDLEWARES": {
-            'tutorial.middlewares.HttpProxyMiddleware': 100,
-            'tutorial.middlewares.UserAgentMiddleware': 200,
-            'tutorial.middlewares.CustomRetryMiddleware': 300,
+            # 'spider.middlewares.HttpProxyMiddleware': 100,
+            'spider.middlewares.UserAgentMiddleware': 200,
+            'spider.middlewares.CustomRetryMiddleware': 300,
         },
         "ITEM_PIPELINES": {
-            'tutorial.pipelines.Rightment': 400,
-            'tutorial.pipelines.AsyncDb': 500,
+            'spider.pipelines.Rightment': 400,
+            'spider.pipelines.AsyncDb': 500,
         },
-        # "FEEDS": {
-        #     "feeds/rightment/%(name)s_%(time)s.json": {
-        #         "format": "json",
-        #         "encoding": "utf-8",
-        #         "indent": 4,
-        #     },
-        # },
+        "FEEDS": {
+            "feeds/rgt/%(name)s_%(time)s.json": {
+                "format": "json",
+                "encoding": "utf-8",
+                "indent": 4,
+            },
+        },
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
@@ -62,7 +64,35 @@ class Rightment(BaseSpider):
         "LOGSTATS_INTERVAL": 60,  # 每60秒输出一次统计信息
     }
 
-    async def start(self):
+    rgt_ex_date = {}
+
+    def preload(self, results):
+        # retrieve from database
+        r_map = {r[0]: r[1] for r in results}
+        self.rgt_ex_date = r_map
+
+    # async def start(self):
+    def start_requests(self):
+        # 使用 defer 机制处理异步操作
+        rgt_sql = """
+            WITH ranked_rgt AS (
+                SELECT
+                    sid,
+                    ex_date,
+                    ROW_NUMBER() OVER (PARTITION BY sid ORDER BY ex_date DESC) as rn
+                FROM rightment
+            )
+            SELECT
+                sid,
+                ex_date
+            FROM ranked_rgt
+            WHERE rn = 1
+            ORDER BY sid DESC, ex_date DESC;
+        """
+        deferred = async_ops.on_query(rgt_sql)
+        deferred.addCallback(self.preload)
+        # deferred.addErrback(self.on_query_error)
+
         params = {'sortColumns': 'EQUITY_RECORD_DATE',
                   'sortTypes': -1,
                   'pageSize': 50,
@@ -70,13 +100,13 @@ class Rightment(BaseSpider):
                   'reportName': 'RPT_IPO_ALLOTMENT',
                   'columns': 'ALL'}
 
-        start_url = self.routers['rightment'] + urlencode(params, quote_via=quote)
+        start_url = os.getenv('RGT_URL') + urlencode(params, quote_via=quote)
         yield scrapy.Request(start_url, callback=self.parse, 
                              meta={'params': params}, 
                              errback=self.errback_httpbin,
                              dont_filter=True)
         
-    def parse(self, response, **kwargs):
+    async def parse(self, response, **kwargs):
         self.logger.info(f"Response url: {response.url} and status: {response.status}")
         meta = response.meta
 
@@ -125,7 +155,7 @@ class Rightment(BaseSpider):
             # 为下一页创建新的参数副本
             next_params = meta['params'].copy()
             next_params['pageNumber'] = current_page + 1
-            next_url = self.routers['rightment'] + urlencode(next_params, quote_via=quote)
+            next_url = os.getenv('RGT_URL') + urlencode(next_params, quote_via=quote)
             self.logger.info(f"Loading page {next_params['pageNumber']}/{total_pages}")
             yield scrapy.Request(next_url, 
                                 callback=self.parse, 

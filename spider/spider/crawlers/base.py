@@ -23,11 +23,18 @@ class BaseSpider(Spider):
     custom_settings = {
         'CONCURRENT_REQUESTS': 16,  # Example setting: number of concurrent requests
     }
+    
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(BaseSpider, cls).from_crawler(crawler, *args, **kwargs)
-        routers = crawler.settings.get('META_URLS')
-        spider.routers = routers
+        
+        # routers = crawler.settings.getdict('META_URLS', {})  # 使用 getdict 而不是 get
+        # 如果没有配置，设置默认值
+        # if not routers:
+        #     spider.logger.warning(f"META_URLS not found in settings, using defaults")
+        
+        # spider.routers = routers
+        # spider.logger.debug(f"Routers configured: {routers}")
         return spider
     
     def _extract_json_with_retry(self, response):

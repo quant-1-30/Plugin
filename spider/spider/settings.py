@@ -5,8 +5,6 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
-import datetime
-
 # Scrapy settings for test project
 #
 # For simplicity, this file contains only settings considered important or
@@ -25,8 +23,8 @@ ROBOTSTXT_OBEY = False
 # 添加异步支持
 TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
 
-SPIDER_MODULES = ['tutorial.spiders']
-NEWSPIDER_MODULE = 'tutorial.spiders'
+SPIDER_MODULES = ['spider.crawlers']
+NEWSPIDER_MODULE = 'spider.crawlers'
 
 # Database settings
 POSTGRES_HOST = 'localhost'
@@ -127,23 +125,23 @@ SPIDER_MIDDLEWARES = {
     'scrapy.spidermiddlewares.referer.RefererMiddleware': None,
     'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware': None,
     'scrapy.spidermiddlewares.depth.DepthMiddleware': None,
-    'tutorial.middlewares.ErrorSpiderMiddleware': 500,
+    'spider.middlewares.ErrorSpiderMiddleware': 500,
 }
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
 EXTENSIONS = {
    'scrapy.extensions.logstats.LogStats': None,
-   'tutorial.extensions.StatsMailer': None,
-   'tutorial.extensions.CoreStats': 0,
+   'spider.extensions.StatsMailer': None,
+   'spider.extensions.CoreStats': 0,
 }
 
 # Configure item pipelines
 # https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 ITEM_PIPELINES = {
-   #  'tutorial.pipelines.BasicsPipeline': 300,
-   #  'tutorial.pipelines.AlignPipeline': 400,
-    # 'tutorial.pipelines.AsyncDb': 500,
+   #  'spider.pipelines.BasicsPipeline': 300,
+   #  'spider.pipelines.AlignPipeline': 400,
+    # 'spider.pipelines.AsyncDb': 500,
 }
 
 # Enable and configure the AutoThrottle extension (disabled by default)
@@ -175,7 +173,7 @@ CONCURRENT_REQUESTS_PER_IP = 16
 # HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
 
 # set log
-LOG_FILE = 'logs/{s}.log'.format(s=datetime.datetime.now().strftime('%Y%m%d_%H:%M:%S'))
+# LOG_FILE = 'logs/{s}.log'.format(s=datetime.datetime.now().strftime('%Y%m%d_%H:%M:%S'))
 LOG_LEVEL = 'INFO'
 
 # mail
@@ -226,11 +224,3 @@ STATSMAILER_RCPTS = ['13776668123@163.com']
 #     'scrapy.extensions.spiderstate.SpiderState': 0,
 #     'scrapy.extensions.throttle.AutoThrottle': 0,
 # }
-
-META_URLS = {
-           'assets': 'http://push2.eastmoney.com/api/qt/clist/get?',
-           'index': 'https://push2his.eastmoney.com/api/qt/stock/kline/get?',
-           'rightment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
-           'adjustment': "https://datacenter-web.eastmoney.com/api/data/v1/get?",
-           'aspects': 'http://finance.sina.com.cn/realstock/company/%s/nc.shtml', # sina finance xpath
-           }

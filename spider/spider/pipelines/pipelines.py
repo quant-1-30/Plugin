@@ -67,7 +67,12 @@ class Asset(Pipeline):
     def process_item(self, item, spider):
         item = valmap(lambda x: x[0], item)
         item.setdefault("delist", 0)
-        return item
+
+        ipo_date = spider.asset_first_trading
+        if int(item["first_trading"]) > ipo_date:
+            self.logger.info(f"Found Asset item: {item} and {ipo_date}")
+            return item
+        return {}
 
 
 class Basics(Pipeline):
@@ -89,7 +94,8 @@ class Adjustment(Pipeline):
         item = valmap(lambda x: x[0], item)
         if "ex_date" not in item:
             # not implemented
-            return
+            self.logger.info(f"Found No Ex_date Adjustment item: {item}")
+            return {} # feeds dict object
     
         m_group = re.match(r'^[630]\d{5}(?:)', item["sid"]) # ?: 非捕获组 只匹配
         if m_group.group():
@@ -99,8 +105,11 @@ class Adjustment(Pipeline):
             
             register_date = item.get("register_date", 0)
             item['register_date'] = int(datetime.strptime(register_date, '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d')) if register_date else 0
-            self.logger.info(f"Found Adjustment item: {item}")
-            return item
+            updt = spider.adj_ex_date.get(item["sid"], 0)
+            self.logger.info(f"Found Adjustment item: {item} and {updt}")
+            if item["ex_date"] > updt:
+                return item
+            return {}
     
 
 class Rightment(Pipeline):
@@ -110,7 +119,8 @@ class Rightment(Pipeline):
     def process_item(self, item, spider):
         item = valmap(lambda x: x[0], item)
         if "ex_date" not in item:
-            return
+            self.logger.info(f"Found No Ex_date Rightment item: {item}")
+            return {} 
 
         item["sid"] = item["sid"].split('.')[0]
         item['report_date'] = int(datetime.strptime(item['report_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
@@ -118,7 +128,12 @@ class Rightment(Pipeline):
         
         register_date = item.get("register_date", 0)
         item['register_date'] = int(datetime.strptime(register_date, '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d')) if register_date else 0
-        return item
+        
+        updt = spider.rgt_ex_date.get(item["sid"], 0)
+        self.logger.info(f"Found Rightment item: {item} and {updt}")
+        if item["ex_date"] > updt:
+            return item
+        return {}
 
 
 class AsyncDb(Pipeline):
@@ -167,13 +182,20 @@ class AsyncDb(Pipeline):
         return Deferred.fromFuture(
             asyncio.run_coroutine_threadsafe(_close(), self._loop)
         )
+    
+    async def _flush_batch(self, batches, ops):
+        for batch in batches:
+            table = batch.table_name
+            item = batch.item
+            columns = ', '.join(item.keys())
+            values = ', '.join([f':{k}' for k in item.keys()])
+            sql = text(f"INSERT INTO {table} ({columns}) VALUES ({values})")
+            await ops.on_insert(sql, item)
 
     async def _consume_loop(self, spider):
         # 单线程执行不存在 多个协程并发修改 self.buffer --- asyncio.lock
         try:
             async with async_ops as ops:
-                await ops.initialize(spider.crawler)
-
                 while True:
                     try:
                         # timeout 是为了保证 flush_interval 后能继续走逻辑
@@ -201,15 +223,6 @@ class AsyncDb(Pipeline):
 
         except Exception as e:
             self.logger.error(f"[AsyncDb] Background consume loop failed: {e}", exc_info=True)
-
-    async def _flush_batch(self, batch, ops):
-        for named_data in batch:
-            table_name = named_data.table_name
-            item = named_data.item
-            columns = ', '.join(item.keys())
-            values = ', '.join([f':{k}' for k in item.keys()])
-            sql = text(f"INSERT INTO {table_name} ({columns}) VALUES ({values})")
-            await ops.on_insert(sql, item)
 
 
 class CsvWriter(Pipeline):

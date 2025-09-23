@@ -5,10 +5,9 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
-import scrapy
-import json
-import gzip
+import os
 import numpy as np
+import scrapy
 
 from datetime import datetime
 from urllib.parse import urlencode, quote
@@ -16,6 +15,8 @@ from scrapy.loader import ItemLoader
 
 from pipelines.items import AssetItem
 from crawlers.base import BaseSpider
+from utils.operator import async_ops
+
 
 __all__ = ['Stock']
 
@@ -24,7 +25,7 @@ class Stock(BaseSpider):
 
     name = 'stock'
     table_name = "asset"
-    allowed_domains = ['push2.eastmoney.com', 'finance.sina.com.cn', 'push2his.eastmoney.com']
+    allowed_domains = ['push2.eastmoney.com', 'finance.sina.com.cn', 'push2his.eastmoney.com', 'push2delay.eastmoney.com']
     handle_httpstatus_list = [301, 302]
     
     custom_settings = {
@@ -43,21 +44,21 @@ class Stock(BaseSpider):
         # Add more custom settings as needed
         # Middleware settings
         "DOWNLOADER_MIDDLEWARES": {
-            'tutorial.middlewares.HttpProxyMiddleware': 100,
-            'tutorial.middlewares.UserAgentMiddleware': 200,
-            'tutorial.middlewares.CustomRetryMiddleware': 300,
+            # 'spider.middlewares.HttpProxyMiddleware': 100,
+            'spider.middlewares.UserAgentMiddleware': 200,
+            'spider.middlewares.CustomRetryMiddleware': 300,
         },
         "ITEM_PIPELINES": {
-            'tutorial.pipelines.Asset': 400,
-            'tutorial.pipelines.AsyncDb': 500,
+            'spider.pipelines.Asset': 400,
+            'spider.pipelines.AsyncDb': 500,
         },
-        # "FEEDS": {
-        #     "feeds/stock/%(name)s_%(time)s.json": {
-        #         "format": "json",
-        #         "encoding": "utf-8",
-        #         "indent": 4,
-        #     },
-        # },
+        "FEEDS": {
+            "feeds/stock/%(name)s_%(time)s.json": {
+                "format": "json",
+                "encoding": "utf-8",
+                "indent": 4,
+            },
+        },
         # 日志配置
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -72,21 +73,40 @@ class Stock(BaseSpider):
         "LOGSTATS_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",  # 统计信息的格式
         "LOGSTATS_DATEFORMAT": "%Y-%m-%d %H:%M:%S",  # 统计信息的时间格式
     }
+    asset_first_trading=0
 
-    async def start(self):
+    def preload(self, result): # used to filter
+        # import pdb; pdb.set_trace()
+        self.asset_first_trading = int(result[0][0])
+
+    # async def start(self):
+    def start_requests(self):
+                # 使用 defer 机制处理异步操作
+        adj_sql = """SELECT max(first_trading) FROM asset"""
+        deferred = async_ops.on_query(adj_sql)
+        deferred.addCallback(self.preload)
+        # deferred.addErrback(self.on_query_error)
+
         self.logger.info("Starting stock spider...")
-        params = {'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23',
+        params = {'np': 1,
+                  'fltt': 1,
+                  'invt': 2,
+                  'fs': 'm:0+f:8,m:1+f:8',# m:0 上海 / m:1 深圳 / f:8 正常上市
                   'fields': 'f12,f14,f26',
+                  'fid':'f26', # nececcery
+                  'po': 1,
                   'pn': 1,
-                  'pz': 50} # 10000
-        start_url = self.routers['assets'] + urlencode(params, quote_via=quote)
+                  'pz': 20,
+                  'dect': 1} # 10000
+        start_url = os.getenv("ASSET_URL") + urlencode(params, quote_via=quote)
         self.logger.info(f"Requesting URL: {start_url}")
+        print(f"Requesting URL: {start_url}")
         yield scrapy.Request(start_url, callback=self.parse, 
                              meta={'page': 1, 'params': params, 'retry_times': 0}, 
                              errback=self.errback_httpbin,
                              dont_filter=True)
 
-    def parse(self, response, **kwargs):
+    async def parse(self, response, **kwargs):
         self.logger.info(f"Response headers: {response.headers} url: {response.url} and status: {response.status}")
         
         content = self._extract_json_with_retry(response)
@@ -104,7 +124,7 @@ class Stock(BaseSpider):
             return
             
         # set loader
-        for _, obj in diff.items():
+        for obj in diff:
             asset = ItemLoader(item=AssetItem())
             asset.add_value('sid', obj['f12'])
             asset.add_value('name', obj['f14'])
@@ -117,7 +137,7 @@ class Stock(BaseSpider):
         meta['page'] += 1
         next_params = meta['params'].copy()
         next_params['pn'] = meta['page']
-        next_url = self.routers['assets'] + urlencode(next_params, quote_via=quote)
+        next_url = os.getenv("ASSET_URL") + urlencode(next_params, quote_via=quote)
         self.logger.info(f"Requesting next page: {next_url}")
 
         yield scrapy.Request(next_url, callback=self.parse, 

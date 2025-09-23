@@ -5,6 +5,7 @@ Created on Tue Mar 12 15:37:47 2019
 
 @author: python
 """
+import os
 import scrapy
 import numpy as np
 
@@ -15,6 +16,7 @@ from scrapy.loader import ItemLoader
 from pipelines.items import Dividend
 from crawlers.base import BaseSpider
 from utils.tools import quarter_date
+from utils.operator import async_ops
 
 
 __all__ = ['Adjustment']
@@ -39,21 +41,21 @@ class Adjustment(BaseSpider):
         # Add more custom settings as needed
         # Middleware settings
         "DOWNLOADER_MIDDLEWARES": {
-            'tutorial.middlewares.HttpProxyMiddleware': 100,
-            'tutorial.middlewares.UserAgentMiddleware': 200,
-            'tutorial.middlewares.CustomRetryMiddleware': 300,
+            # 'spider.middlewares.HttpProxyMiddleware': 100,
+            'spider.middlewares.UserAgentMiddleware': 200,
+            'spider.middlewares.CustomRetryMiddleware': 300,
         },
         "ITEM_PIPELINES": {
-            'tutorial.pipelines.Adjustment': 400,
-            'tutorial.pipelines.AsyncDb': 500,
+            'spider.pipelines.Adjustment': 400,
+            'spider.pipelines.AsyncDb': 500,
         },
-        # "FEEDS": {
-        #     "feeds/rightment/%(name)s_%(time)s.json": {
-        #         "format": "json",
-        #         "encoding": "utf-8",
-        #         "indent": 4,
-        #     },
-        # },
+        "FEEDS": {
+            "feeds/adj/%(name)s_%(time)s.json": {
+                "format": "json",
+                "encoding": "utf-8",
+                "indent": 4,
+            },
+        },
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
@@ -64,8 +66,37 @@ class Adjustment(BaseSpider):
         "LOGSTATS_INTERVAL": 60,  # 每60秒输出一次统计信息
     }
 
-    async def start(self):
-        start_date = self.settings.get('START_DATE', '1990-01-01') 
+    adj_ex_date = {}
+
+    def preload(self, results):
+        # retrieve from database
+        r_map = {r[0]: r[1] for r in results}
+        self.adj_ex_date = r_map
+        # import pdb; pdb.set_trace()
+
+    # async def start(self):
+    def start_requests(self):
+        # 使用 defer 机制处理异步操作
+        adj_sql = """
+            WITH ranked_adj AS (
+                SELECT
+                    sid,
+                    ex_date,
+                    ROW_NUMBER() OVER (PARTITION BY sid ORDER BY ex_date DESC) as rn
+                FROM adjustment
+            )
+            SELECT
+                sid,
+                ex_date
+            FROM ranked_adj
+            WHERE rn = 1
+            ORDER BY sid DESC, ex_date DESC;
+        """
+        deferred = async_ops.on_query(adj_sql)
+        deferred.addCallback(self.preload)
+        # deferred.addErrback(self.on_query_error)
+
+        start_date = os.getenv('ADJ_UPDT', '1990-01-01') 
         base_params = {'sortColumns': 'REPORT_DATE',
                        'sortTypes': -1,
                        'pageSize': 50,
@@ -78,14 +109,14 @@ class Adjustment(BaseSpider):
             params = base_params.copy()
             params['filter'] = f"(REPORT_DATE='{report_date}')"
             # setup adjustment params
-            start_url = self.routers['adjustment'] + urlencode(params, quote_via=quote)
+            start_url = os.getenv('ADJ_URL') + urlencode(params, quote_via=quote)
             self.logger.info(f"Start url: {start_url}")
             yield scrapy.Request(start_url, callback=self.parse, 
                                  meta={'params': params},
                                  errback=self.errback_httpbin,
                                  dont_filter=True)
         
-    def parse(self, response, **kwargs):
+    async def parse(self, response, **kwargs):
         self.logger.info(f"Response url: {response.url} and status: {response.status}")
         meta = response.meta
 
@@ -98,8 +129,6 @@ class Adjustment(BaseSpider):
         result = content['result']
         if not result or not result.get('data'):
             self.logger.info(f"No dividend data found for date (filter: {meta['params']['filter']})")
-            
-            # 检查响应结构以帮助调试
             if result:
                 self.logger.debug(f"Result keys for {meta['params']['filter']}: {list(result.keys())}")
                 self.logger.debug(f"Total pages info: {result.get('pages', 'N/A')}")
@@ -132,7 +161,7 @@ class Adjustment(BaseSpider):
             # 为下一页创建新的参数副本
             next_params = meta['params'].copy()
             next_params['pageNumber'] = current_page + 1
-            next_url = self.routers['adjustment'] + urlencode(next_params, quote_via=quote)
+            next_url = os.getenv('ADJ_URL') + urlencode(next_params, quote_via=quote)
             self.logger.info(f"Loading page {next_params['pageNumber']}/{total_pages} for {meta['params']['filter']}")
             yield scrapy.Request(next_url, 
                                  callback=self.parse, 
