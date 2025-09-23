@@ -60,7 +60,6 @@ HTTPPROXY_ENABLED = True
 DOWNLOAD_DELAY = 0.5
 RANDOMIZE_DOWNLOAD_DELAY = True
 
-
 # Disable cookies (enabled by default)
 # disable cookies (see COOKIES_ENABLED) as some sites may use cookies to spot bot behaviour
 COOKIES_ENABLED = False

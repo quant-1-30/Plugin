@@ -1,30 +1,3 @@
-a.获取全部的资产标的 --- equity convertible etf
-b.筛选出需要更新的标的（与缓存进行比较）
-# 字段非string一定要单独进行格式处理
-asset status 由于吸收合并代码可能会消失但是主体继续上市存在 e.g. T00018
-对于暂停上市 delist_date 为None 作为一种长期停盘的情况来考虑，由于我们不能存在后视误差不清楚是否能重新上市）
-基于算法发出信号操作暂时上市的标的, 为了避免前视误差，过滤筛选距离已经退市标的而不是暂停上市  e.g. 5个交易日的股票
-对于暂停上市的股票可能还存在重新上市的可能性也可能存在退市的可能性 --- None ,状态不断的更新
-sr=-1 --- 表示倒序 sr=1 --- 顺序 或者 sortRule format {} 过滤
-科创板是我国首个实行注册制的板块，我们在看科创板行情的时候，会发现一些科创板的股票后面会带有一些字母，那么科创板字母代表什么呢?
-
-我们经常看到的科创板股票字母有N、C、U、W、V, 它们分别有一下含义:
-
-N表示科创板新股上市的第一天,C表示新股上市次日到第五天之间。科创板新股第一到第五个交易日无涨跌幅限制。
-
-U表示发行人尚未盈利。科创板实行注册制, 上市标准丰富,未盈利的企业也可以上市。
-
-W则代表发行人具有表决权差异安排。
-
-V则代表发行人具有协议控制架构或者类似特殊安排。
-
-D就说明公司是以CDR(中国存托凭证)形式登陆科创板。
-
-除了科创板之外，创业板企业也有以上字母表达相同样的含义。
-
-科创板创业板也是有ST制度的, 但是这两个板块的退市标准相对于主板存在一定的差异。而且即便科创板\创业板企业出现了退市警示，
-涨跌幅限制依旧是20%》。
-
 This package will contain the spiders of your Scrapy project
 
 Please refer to the documentation for information on how to create and manage
@@ -107,10 +80,6 @@ smtptls (bool) – enforce using SMTP STARTTLS
 
 smtpssl (bool) – enforce using a secure SSL connection
 
-# asset / rightment / adjustment --- via eastmoney not sina
-# update via os.environment args
-# a. target scrapy into pg / b. crontab
-
 Deferred 是 Twisted 框架的核心概念之一，它提供了一种优雅的方式来处理异步操作，特别是在像 Scrapy 这样的事件驱动框架中
 Deferred.addCallback / addErrback
 
@@ -118,6 +87,18 @@ alter table rightment alter column report_date set not null;
 alter table rightment drop constraint uq_sid_ex_date_rightment;
 alter table rightment add constraint uq_sid_report_date_rightment unique (sid, report_date);
 
-# adjustment update logic 2025-06-07 
+Scrapy 的 FEEDS 设置保存数据，您需要确保返回的对象是 Scrapy 可以处理的类型（如字典或 Item 对象）
 
- Scrapy 的 FEEDS 设置保存数据，您需要确保返回的对象是 Scrapy 可以处理的类型（如字典或 Item 对象）
+科创板是我国首个实行注册制的板块，N、C、U、W、V(创业板相同样的含义):
+
+N表示科创板新股上市的第一天,C表示新股上市次日到第五天之间。科创板新股第一到第五个交易日无涨跌幅限制。
+
+U表示发行人尚未盈利。科创板实行注册制, 上市标准丰富,未盈利的企业也可以上市。
+
+W则代表发行人具有表决权差异安排。
+
+V则代表发行人具有协议控制架构或者类似特殊安排。
+
+D就说明公司是以CDR(中国存托凭证)形式登陆科创板。
+
+科创板创业板有ST制度的, 但是这两个板块的退市标准相对于主板存在一定的差异。而且即便科创板\创业板企业出现了退市警示，涨跌幅限制依旧是20%。
