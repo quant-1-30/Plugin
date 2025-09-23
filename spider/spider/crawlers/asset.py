@@ -78,6 +78,7 @@ class Stock(BaseSpider):
     def preload(self, result): # used to filter
         # import pdb; pdb.set_trace()
         self.asset_first_trading = int(result[0][0])
+        self.logger.info(f"Preload Asset first_trading {result[0][0]}")
 
     # async def start(self):
     def start_requests(self):
