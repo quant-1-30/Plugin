@@ -68,11 +68,11 @@ class Adjustment(BaseSpider):
 
     adj_ex_date = {}
 
-    def preload(self, results):
-        # retrieve from database
-        r_map = {r[0]: r[1] for r in results}
-        self.adj_ex_date = r_map
+    def preload(self, result):
         # import pdb; pdb.set_trace()
+        if result:
+            r_map = {r[0]: r[1] for r in result}
+            self.adj_ex_date = r_map
 
     # async def start(self):
     def start_requests(self):

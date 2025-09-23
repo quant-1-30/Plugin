@@ -66,10 +66,11 @@ class Rightment(BaseSpider):
 
     rgt_ex_date = {}
 
-    def preload(self, results):
+    def preload(self, result):
         # retrieve from database
-        r_map = {r[0]: r[1] for r in results}
-        self.rgt_ex_date = r_map
+        if result:
+            r_map = {r[0]: r[1] for r in result}
+            self.rgt_ex_date = r_map
 
     # async def start(self):
     def start_requests(self):

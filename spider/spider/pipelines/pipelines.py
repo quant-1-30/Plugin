@@ -29,7 +29,7 @@ from datetime import datetime
 from utils.tools import coerce_to_uint32
 from utils.operator import async_ops
 
-__all__ = ['Asset', 'Basics', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
+__all__ = ['Asset', 'Benchmark', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
 
 
 namedData = namedtuple('namedData', ['table_name', 'item'])
@@ -73,17 +73,27 @@ class Asset(Pipeline):
             self.logger.info(f"Found Asset item: {item} and {ipo_date}")
             return item
         return {}
+    
 
-
-class Basics(Pipeline):
-    """
-        align item in order to construct frame finally
-    """
+class Benchmark(Pipeline):
+    
     def process_item(self, item, spider):
         if item:
-            item = valmap(lambda x: [(',').join(x)], item)
-        return item
-    
+            item = valmap(lambda x: x[0], item)
+            date = int(datetime.strptime(item['date'], '%Y-%m-%d').strftime('%Y%m%d'))
+            updt = spider.bench_data.get(item["sid"], 0)
+            if date > updt:
+                item["date"] = date
+                item["open"] = 100 * float(item["open"])
+                item["close"] = 100 * float(item["close"])
+                item["high"] = 100 * float(item["high"])
+                item["low"] = 100 * float(item["low"])
+                item["volume"] = int(item["volume"])
+                item["amount"] = int(float(item["amount"]))
+                self.logger.info(f"Found Adjustment item: {item} and {updt}")
+                return item
+        return {}
+
 
 class Adjustment(Pipeline):
     """
@@ -109,7 +119,7 @@ class Adjustment(Pipeline):
             self.logger.info(f"Found Adjustment item: {item} and {updt}")
             if item["ex_date"] > updt:
                 return item
-            return {}
+        return {}
     
 
 class Rightment(Pipeline):

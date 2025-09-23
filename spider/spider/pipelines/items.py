@@ -40,6 +40,10 @@ class KlineItem(Item):
     high = Field()
     # 最低价
     low = Field()
+    # 成交量
+    volume=Field()
+    # 成交额
+    amount=Field()
 
 
 class Dividend(Item):
