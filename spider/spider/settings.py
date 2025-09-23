@@ -26,21 +26,6 @@ TWISTED_REACTOR = 'twisted.internet.asyncioreactor.AsyncioSelectorReactor'
 SPIDER_MODULES = ['spider.crawlers']
 NEWSPIDER_MODULE = 'spider.crawlers'
 
-# Database settings
-POSTGRES_HOST = 'localhost'
-POSTGRES_PORT = '5432'
-POSTGRES_USER = 'postgres'
-POSTGRES_PASSWORD = '20210718'
-POSTGRES_DB = 'bt_feed'
-POSTGRES_ENGINE = 'asyncpg'
-POSTGRES_POOL_SIZE = 20
-POSTGRES_MAX_OVERFLOW = 10
-POSTGRES_POOL_RECYCLE = 3600
-POSTGRES_POOL_PRE_PING = True
-POSTGRES_ECHO = True
-POSTGRES_BATCH_SIZE = 100
-POSTGRES_RETRY = 3
-
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 USER_AGENT = ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15'
               '(KHTML, like Gecko) Version/13.1.2 Safari/605.1.15',
