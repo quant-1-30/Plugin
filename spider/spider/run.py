@@ -24,10 +24,10 @@ runner = CrawlerRunner(get_project_settings())
 # run multiple spiders in sequence
 @defer.inlineCallbacks
 def crawl():
-    # yield runner.crawl(Stock)
+    yield runner.crawl(Stock)
     yield runner.crawl(Benchmark)
-    # yield runner.crawl(Adjustment)
-    # yield runner.crawl(Rightment)
+    yield runner.crawl(Adjustment)
+    yield runner.crawl(Rightment)
     reactor.stop()
 
 
