@@ -80,7 +80,6 @@ class Benchmark(BaseSpider):
         if result:
             r_map = {r[0]: r[1] for r in result}
             self.bench_data = r_map
-            self.logger.info(f"Preload Index date {result[0][0]}")
 
     # async def start(self):
     def start_requests(self):
