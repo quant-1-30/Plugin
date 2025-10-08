@@ -28,6 +28,7 @@ class AsyncOps(object):
     def __init__(self):
         self._initialized = False
         self.engine = None
+        self._loop = asyncio.get_event_loop()
 
     async def __aenter__(self):
         await self._ensure_initialized()
@@ -111,40 +112,61 @@ class AsyncOps(object):
                 """))
                 await session.commit()
     
+    # @defer.inlineCallbacks
+    # def on_query(self, query: str):
+    #     """使用 Scrapy 的 defer 机制"""
+    #     try:
+    #         from twisted.internet.threads import deferToThread
+    #         # 在线程中执行异步代码
+    #         results = yield deferToThread(self._run_async_query, query)
+    #         defer.returnValue(results)
+    #     except Exception as e:
+    #         print(f"查询错误: {e}")
+    #         defer.returnValue([])
+
+    # def _run_async_query(self, query: str):
+    #     async def async_wrapper():
+    #         async with self.get_db() as session:
+    #             if isinstance(query, str):
+    #                 query_obj = text(query)
+    #             # result = await session.execute(query_obj)
+    #             # return result.scalars().all()
+    #             # in asynchronous mode, the synchronous yield_per isn't directly applicable.  you can use the stream() method, which allows streaming query results asynchronously.
+    #             stream = await session.stream(query_obj)
+    #             # stream.scalars() return one field
+    #             results = []
+    #             async for row in stream:
+    #                 # print("result ", row)
+    #                 results.append(row)
+    #             return results
+        
+    #     loop = asyncio.new_event_loop()
+    #     asyncio.set_event_loop(loop)
+    #     try:
+    #         return loop.run_until_complete(async_wrapper())
+    #     finally:
+    #         loop.close()
+
     @defer.inlineCallbacks
     def on_query(self, query: str):
-        """使用 Scrapy 的 defer 机制"""
         try:
-            from twisted.internet.threads import deferToThread
-            # 在线程中执行异步代码
-            results = yield deferToThread(self._run_async_query, query)
+            # 将异步函数提交到全局事件循环
+            future = asyncio.run_coroutine_threadsafe(self._async_query(query), self._loop)
+            results = yield defer.Deferred.fromFuture(future)
             defer.returnValue(results)
         except Exception as e:
             print(f"查询错误: {e}")
             defer.returnValue([])
 
-    def _run_async_query(self, query: str):
-        async def async_wrapper():
-            async with self.get_db() as session:
-                if isinstance(query, str):
-                    query_obj = text(query)
-                # result = await session.execute(query_obj)
-                # return result.scalars().all()
-                # in asynchronous mode, the synchronous yield_per isn't directly applicable.  you can use the stream() method, which allows streaming query results asynchronously.
-                stream = await session.stream(query_obj)
-                # stream.scalars() return one field
-                results = []
-                async for row in stream:
-                    # print("result ", row)
-                    results.append(row)
-                return results
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(async_wrapper())
-        finally:
-            loop.close()
+    async def _async_query(self, query: str):
+        async with self.get_db() as session:
+            if isinstance(query, str):
+                query_obj = text(query)
+            stream = await session.stream(query_obj)
+            results = []
+            async for row in stream:
+                results.append(row)
+            return results
 
     async def on_insert(self, sql:str, param:dict):
         # await self._ensure_initialized()

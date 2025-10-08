@@ -147,16 +147,8 @@ class Rightment(Pipeline):
 
 
 class AsyncDb(Pipeline):
-    def __init__(self, batch_size=10, flush_interval=10, max_retry=3):
-        self.batch_size = batch_size
-        self.max_retry = max_retry
-        self.flush_interval = flush_interval
-        self.queue = asyncio.Queue()
-        self.buffer = []
-        self.logger = None
-        self._worker_task = None
-        self._stop_signal = object()  # 标识关闭队列
-        self._loop = None
+
+    _loop = None
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -165,34 +157,40 @@ class AsyncDb(Pipeline):
             max_retry=crawler.settings.getint('POSTGRES_RETRY', 3)
         )
         instance.logger = crawler.spider.logger
-        instance._loop = asyncio.get_event_loop()
+
+        if cls._loop is None:
+        # avoid attached to a different loop
+            try:
+                cls._loop = asyncio.get_event_loop()
+            except RuntimeError:
+                cls._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(cls._loop)
+        
+        instance._loop = cls._loop
         return instance
 
+    def __init__(self, batch_size=10, flush_interval=10, max_retry=3):
+        self.batch_size = batch_size
+        self.max_retry = max_retry
+        self.flush_interval = flush_interval
+        self.queue = asyncio.Queue() # asyncio.lock
+        self.buffer = []
+        self.logger = None
+        self._worker_task = None
+        self._stop_signal = object()  # 标识关闭队列
+        self._loop = None
+
     def open_spider(self, spider):
-        # 启动后台消费者任务 / concurrent.futures.Future object 
+        # 启动后台消费者任务 / concurrent.futures.Future object
         self._worker_task = asyncio.run_coroutine_threadsafe(self._consume_loop(spider), self._loop)
+        self.logger.info(f"AsyncDb for {spider.name} started with new event loop")
 
     def process_item(self, item, spider):
         self.logger.info(f"Processing AsyncDb item: {item}")
         if item:
-            # noblock put or raise queue.Full
-            self.queue.put_nowait(namedData(spider.table_name, item))
+            self.queue.put_nowait(namedData(spider.table_name, item)) # nonblock put or raise queue.Full
         return item
 
-    def close_spider(self, spider):
-        async def _close():
-            # 发出终止信号
-            await self.queue.put(self._stop_signal)
-            # 等待消费者退出
-            if self._worker_task:
-                # concurrent.futures.Future object to async.Future which can be awaited
-                await asyncio.wrap_future(self._worker_task)
-            await async_ops.cleanup()
-
-        return Deferred.fromFuture(
-            asyncio.run_coroutine_threadsafe(_close(), self._loop)
-        )
-    
     async def _flush_batch(self, batches, ops):
         for batch in batches:
             table = batch.table_name
@@ -202,38 +200,59 @@ class AsyncDb(Pipeline):
             sql = text(f"INSERT INTO {table} ({columns}) VALUES ({values})")
             await ops.on_insert(sql, item)
 
+    async def force_flush(self):
+        async with async_ops as ops:
+            if self.buffer:
+                await self._flush_batch(self.buffer, ops)
+                self.buffer.clear()
+
     async def _consume_loop(self, spider):
-        # 单线程执行不存在 多个协程并发修改 self.buffer --- asyncio.lock
         try:
-            async with async_ops as ops:
-                while True:
-                    try:
-                        # timeout 是为了保证 flush_interval 后能继续走逻辑
-                        data = await asyncio.wait_for(self.queue.get(), timeout=self.flush_interval)
-                        if data is self._stop_signal:
-                            break
+            while True:
+                try:
+                    data = await asyncio.wait_for(self.queue.get(), timeout=self.flush_interval)
+                    if data is self._stop_signal:
+                        print("Received stop signal, exiting consume loop")
+                        break
 
-                        self.buffer.append(data)
+                    self.buffer.append(data)
 
-                        # 满 batch 大小就 flush
-                        if len(self.buffer) >= self.batch_size:
-                            await self._flush_batch(self.buffer, ops)
-                            self.buffer.clear()
+                    # 满 batch 大小就 flush
+                    if len(self.buffer) >= self.batch_size:
+                        await self.force_flush()
 
-                    except asyncio.TimeoutError:
-                        # 到达 flush_interval，强制 flush
-                        if self.buffer:
-                            await self._flush_batch(self.buffer, ops)
-                            self.buffer.clear()
+                except asyncio.TimeoutError:
+                    await self.force_flush()
 
-                # 停止时最后 flush 一次
-                if self.buffer:
-                    await self._flush_batch(self.buffer, ops)
-                    self.buffer.clear()
+            await self.force_flush()
 
         except Exception as e:
             self.logger.error(f"[AsyncDb] Background consume loop failed: {e}", exc_info=True)
 
+    def close_spider(self, spider):
+        print("Closing AsyncDb spider...")
+
+        async def _close():
+            try:
+                if hasattr(self, '_worker_task') and not self._worker_task.done():
+                    await self.queue.put(self._stop_signal)
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.wrap_future(self._worker_task), 
+                            timeout=10.0
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Cancel Worker")
+                        self._worker_task.cancel()
+                
+                await self.force_flush()
+            except Exception as e:
+                self.logger.error(f"Error during close: {e}")
+        
+        # 执行关闭
+        close_future = asyncio.run_coroutine_threadsafe(_close(), self._loop)
+        return Deferred.fromFuture(close_future)
+    
 
 class CsvWriter(Pipeline):
     def __init__(self, filename):
