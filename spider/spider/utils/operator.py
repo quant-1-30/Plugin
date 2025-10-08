@@ -11,9 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 from contextlib import asynccontextmanager
 
-
 __all__ = ["async_ops"]
-
 
 
 class AsyncOps(object):
