@@ -96,7 +96,7 @@ class Adjustment(BaseSpider):
         deferred.addCallback(self.preload)
         # deferred.addErrback(self.on_query_error)
 
-        start_date = os.getenv('ADJ_UPDT', '1990-01-01') 
+        start_date = os.getenv('ADJ_START_UPDT', '1990-01-01') 
         base_params = {'sortColumns': 'REPORT_DATE',
                        'sortTypes': -1,
                        'pageSize': 50,
