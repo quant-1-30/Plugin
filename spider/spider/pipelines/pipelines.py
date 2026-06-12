@@ -12,10 +12,10 @@ Created on Tue Mar 12 15:37:47 2019
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 # useful for handling different item types with a single interface
-
+import os
 import re
+import json
 import asyncio
-import h5py
 import numpy as np
 import pandas as pd
 from toolz import valmap
@@ -25,11 +25,14 @@ from twisted.internet.defer import Deferred
 from collections import namedtuple
 from sqlalchemy import text
 from datetime import datetime
+from scrapy.exceptions import DropItem  
 
 from utils.tools import coerce_to_uint32
 from utils.operator import async_ops
+from spider.encoder import CustomFeedJsonEncoder
 
-__all__ = ['Asset', 'Benchmark', 'Adjustment', 'Rightment', 'AsyncDb', 'HDF5Writer']
+
+__all__ = ['Asset', 'Adjustment', 'Rightment', 'AsyncDb', 'JsonlFeed']
 
 
 namedData = namedtuple('namedData', ['table_name', 'item'])
@@ -68,32 +71,16 @@ class Asset(Pipeline):
         item = valmap(lambda x: x[0], item)
         item.setdefault("delist", 0)
 
-        ipo_date = spider.asset_first_trading
-        if int(item["first_trading"]) > ipo_date:
-            self.logger.info(f"Found Asset item: {item} and {ipo_date}")
+        max_date = spider.asset_latest_date
+        if int(item["first_trading"]) > max_date:
+            item["sid"] = item["sid"].encode("utf-8")
+            item["name"] = item["name"].encode("utf-8")
+
+            self.logger.info(f"Found Asset item: {item}")
             return item
-        return {}
+        # return {}
+        raise DropItem("Empty Asset")
     
-
-class Benchmark(Pipeline):
-    
-    def process_item(self, item, spider):
-        if item:
-            item = valmap(lambda x: x[0], item)
-            date = int(datetime.strptime(item['date'], '%Y-%m-%d').strftime('%Y%m%d'))
-            updt = spider.bench_data.get(item["sid"], 0)
-            if date > updt:
-                item["date"] = date
-                item["open"] = 100 * float(item["open"])
-                item["close"] = 100 * float(item["close"])
-                item["high"] = 100 * float(item["high"])
-                item["low"] = 100 * float(item["low"])
-                item["volume"] = int(item["volume"])
-                item["amount"] = int(float(item["amount"]))
-                self.logger.info(f"Found Adjustment item: {item} and {updt}")
-                return item
-        return {}
-
 
 class Adjustment(Pipeline):
     """
@@ -105,21 +92,25 @@ class Adjustment(Pipeline):
         if "ex_date" not in item:
             # not implemented
             self.logger.info(f"Found No Ex_date Adjustment item: {item}")
-            return {} # feeds dict object
+            # return {} # feeds dict object
+            raise DropItem("Empty Adjustment")
     
         m_group = re.match(r'^[630]\d{5}(?:)', item["sid"]) # ?: 非捕获组 只匹配
-        if m_group.group():
-            item["sid"] = item["sid"].split('.')[0]
+        if m_group and m_group.group():
+            # item["sid"] = item["sid"].split('.')[0]
+            item["sid"] = item["sid"].split('.')[0].encode("utf-8")
             item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
             item['report_date'] = int(datetime.strptime(item['report_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
             
             register_date = item.get("register_date", 0)
             item['register_date'] = int(datetime.strptime(register_date, '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d')) if register_date else 0
+
             updt = spider.adj_ex_date.get(item["sid"], 0)
             self.logger.info(f"Found Adjustment item: {item} and {updt}")
             if item["ex_date"] > updt:
                 return item
-        return {}
+        # return {}
+        raise DropItem("Empty Adjustment")
     
 
 class Rightment(Pipeline):
@@ -130,9 +121,11 @@ class Rightment(Pipeline):
         item = valmap(lambda x: x[0], item)
         if "ex_date" not in item:
             self.logger.info(f"Found No Ex_date Rightment item: {item}")
-            return {} 
+            # return {} 
+            raise DropItem("Empty Rightment")
 
-        item["sid"] = item["sid"].split('.')[0]
+        # item["sid"] = item["sid"].split('.')[0]
+        item["sid"] = item["sid"].split('.')[0].encode("utf-8")
         item['report_date'] = int(datetime.strptime(item['report_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
         item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
         
@@ -143,7 +136,8 @@ class Rightment(Pipeline):
         self.logger.info(f"Found Rightment item: {item} and {updt}")
         if item["ex_date"] > updt:
             return item
-        return {}
+        # return {}
+        raise DropItem("Empty Rightment")
 
 
 class AsyncDb(Pipeline):
@@ -249,196 +243,21 @@ class AsyncDb(Pipeline):
             except Exception as e:
                 self.logger.error(f"Error during close: {e}")
         
-        # 执行关闭
         close_future = asyncio.run_coroutine_threadsafe(_close(), self._loop)
         return Deferred.fromFuture(close_future)
-    
-
-class CsvWriter(Pipeline):
-    def __init__(self, filename):
-        self.filename = filename
-        self.file = open(filename, 'w')
-        
-    def process_item(self, item, spider):
-        self.file.write(item)
 
 
-class HDF5Writer(Pipeline):
-    """
-    Class capable of writing daily OHLCV data to disk in a format that
-    can be read efficiently by HDF5DailyBarReader.
+class JsonlFeed(Pipeline):
 
-    Parameters
-    ----------
-    filename : str
-        The location at which we should write our output.
-    date_chunk_size : int
-        The number of days per chunk in the HDF5 file. If this is
-        greater than the number of days in the data, the chunksize will
-        match the actual number of days.
+    def open_spider(self, spider):
+        os.makedirs("feeds/jsonl", exist_ok=True)
+        time_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.file = open(f"feeds/jsonl/{spider.name}_{time_str}.jsonl", "w", encoding="utf-8")
 
-    See Also
-    --------
-    zipline.data.hdf5_daily_bars.HDF5DailyBarReader
-    """
-    VERSION = 0
-
-    DATA = 'data'
-    # INDEX = 'index'
-    SCALING_FACTOR = 'scaling_factor'
-
-    OPEN = 'open'
-    HIGH = 'high'
-    LOW = 'low'
-    CLOSE = 'close'
-    VOLUME = 'volume'
-
-    FIELDS = (OPEN, HIGH, LOW, CLOSE, VOLUME)
-
-    DEFAULT_SCALING_FACTORS = {
-        # Retain 3 decimal places for prices.
-        OPEN: 1000,
-        HIGH: 1000,
-        LOW: 1000,
-        CLOSE: 1000,
-        # Volume is expected to be a whole integer.
-        VOLUME: 1,
-    }
-
-    def __init__(self, filename, date_chunk_size):
-        self._filename = filename
-        self._date_chunk_size = date_chunk_size
-
-    def h5_file(self, mode):
-        return h5py.File(self._filename, mode)
-
-    def write(self,
-              field,
-              frames,
-              scaling_factors=None):
-        """
-        Write the OHLCV data for one country to the HDF5 file.
-
-        Parameters
-        ----------
-        frames : dict[str, pd.DataFrame]
-            A dict mapping each OHLCV field to a dataframe with a row
-            for each date and a column for each sid. The dataframes need
-            to have the same index and columns.
-        scaling_factors : dict[str, float], optional
-            A dict mapping each OHLCV field to a scaling factor, which
-            is applied (as a multiplier) to the values of field to
-            efficiently store them as uint32, while maintaining desired
-            precision. These factors are written to the file as metadata,
-            which is consumed by the reader to adjust back to the original
-            float values. Default is None, in which case
-            DEFAULT_SCALING_FACTORS is used.
-        """
-        if scaling_factors is None:
-            scaling_factors = self.DEFAULT_SCALING_FACTORS
-
-        with self.h5_file(mode='a') as h5_file:
-            # ensure that the file version has been written
-            h5_file.attrs['version'] = self.VERSION
-
-            # self._write_index_group(country_group, days, sids)
-            field_group = h5_file.create_group(field)
-            # sub_group
-            self._write_data_group(
-                field_group,
-                frames,
-                scaling_factors,
-                chunks=None,
-            )
-
-    def write_from_sid_df_pairs(self,
-                                field_code,
-                                data,
-                                currency_codes=None,
-                                scaling_factors=None):
-        """
-        Parameters
-        ----------
-        country_code : str
-            The ISO 3166 alpha-2 country code for this country.
-        data : iterable[tuple[int, pandas.DataFrame]]
-            The data chunks to write. Each chunk should be a tuple of
-            sid and the data for that asset.
-        currency_codes : pd.Series, optional
-            Series mapping sids to 3-digit currency code values for those sids'
-            listing currencies. If not passed, missing currencies will be
-            written.
-        scaling_factors : dict[str, float], optional
-            A dict mapping each OHLCV field to a scaling factor, which
-            is applied (as a multiplier) to the values of field to
-            efficiently store them as uint32, while maintaining desired
-            precision. These factors are written to the file as metadata,
-            which is consumed by the reader to adjust back to the original
-            float values. Default is None, in which case
-            DEFAULT_SCALING_FACTORS is used.
-        """
-        data = list(data)
-        if not data:
-            empty_frame = pd.DataFrame(
-                data=None,
-                index=np.array([], dtype='datetime64[ns]'),
-                columns=np.array([], dtype='int64'),
-            )
-            return self.write(
-                {f: empty_frame.copy() for f in self.FIELDS},
-                scaling_factors,
-            )
-
-        sids, frames = zip(*data)
-        ohlcv_frame = pd.concat(frames)
-
-        # Repeat each sid for each row in its corresponding frame.
-        sid_ix = np.repeat(sids, [len(f) for f in frames])
-
-        # Add id to the index, so the frame is indexed by (date, id).
-        ohlcv_frame.set_index(sid_ix, append=True, inplace=True)
-
-        frames = {
-            field: ohlcv_frame[field].unstack()
-            for field in self.FIELDS
-        }
-
-        return self.write(
-            field_code,
-            frames=frames,
-            scaling_factors=scaling_factors,
-        )
-
-    def _write_data_group(self,
-                          field_group,
-                          frames,
-                          scaling_factors,
-                          chunks):
-        """Write /country/data
-        """
-        data_group = field_group.create_group(self.DATA)
-
-        for field in self.FIELDS:
-            frame = frames[field]
-
-            # Sort rows by increasing sid, and columns by increasing date.
-            frame.sort_index(inplace=True)
-            frame.sort_index(axis='columns', inplace=True)
-
-            data = coerce_to_uint32(
-                frame.T.fillna(0).values,
-                scaling_factors[field],
-            )
-
-            dataset = data_group.create_dataset(
-                field,
-                compression='lzf',
-                shuffle=True,
-                data=data,
-                chunks=chunks,
-            )
-            dataset.attrs[self.SCALING_FACTOR] = scaling_factors[field]
+    def close_spider(self, spider):
+        self.file.close()
 
     def process_item(self, item, spider):
-        owner = item['owner'][0]
-        self.write(owner,item)
+        line = json.dumps(dict(item), indent=4, cls=CustomFeedJsonEncoder, ensure_ascii=False) + "\n"
+        self.file.write(line)
+        return item

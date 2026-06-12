@@ -33,7 +33,6 @@ class Rightment(BaseSpider):
         "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
         "AUTOTHROTTLE_MAX_DELAY": np.random.randint(20, 30),
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 1,
-        'DOWNLOAD_DELAY': np.random.randint(5, 10),  # Example setting: delay between requests
         'CONCURRENT_REQUESTS': 1,  # Example setting: number of concurrent requests
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed
@@ -46,22 +45,27 @@ class Rightment(BaseSpider):
         "ITEM_PIPELINES": {
             'spider.pipelines.Rightment': 400,
             'spider.pipelines.AsyncDb': 500,
+            'spider.pipelines.JsonlFeed': 600
         },
-        "FEEDS": {
-            "feeds/rgt/%(name)s_%(time)s.json": {
-                "format": "json",
-                "encoding": "utf-8",
-                "indent": 4,
-            },
-        },
+
+        # "FEED_EXPORTERS": {
+        #     "jsonlines": "spider.export.SafeJsonLinesExporter",
+        # },
+        # "FEEDS": {
+        #     "feeds/rgt/%(name)s_%(time)s.json": {
+        #         "format": "json",
+        #         "encoding": "utf-8",
+        #         "indent": 4,
+        #     },
+        # },
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
-        "LOG_FILE": "logs/rgt_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
+        "LOG_FILE": "logs/rgt_%s.log" % datetime.now().strftime('%Y%m%d_%H%M%S'),
         "LOG_ENABLED": True,
-        "LOG_STDOUT": True,  # 同时输出到控制台
-        "LOG_SHORT_NAMES": True,  # 使用短名称
-        "LOGSTATS_INTERVAL": 60,  # 每60秒输出一次统计信息
+        "LOG_STDOUT": True,  
+        "LOG_SHORT_NAMES": True,  
+        "LOGSTATS_INTERVAL": 60,  
     }
 
     rgt_ex_date = {}
@@ -74,7 +78,6 @@ class Rightment(BaseSpider):
 
     # async def start(self):
     def start_requests(self):
-        # 使用 defer 机制处理异步操作
         rgt_sql = """
             WITH ranked_rgt AS (
                 SELECT
@@ -120,7 +123,6 @@ class Rightment(BaseSpider):
         if not result or not result.get('data'):
             self.logger.info(f"No rightment data found for {result}")
             
-            # 检查响应结构以帮助调试
             if result:
                 self.logger.debug(f"Result keys for {list(result.keys())}")
                 self.logger.debug(f"Total pages info: {result.get('pages', 'N/A')}")
@@ -132,7 +134,6 @@ class Rightment(BaseSpider):
         if not datas:
             return
     
-        # 记录找到的数据数量
         data_count = len(datas)
         current_page = meta['params']['pageNumber']
         self.logger.info(f"Found {data_count} rightment records for (page {current_page})")
@@ -150,10 +151,8 @@ class Rightment(BaseSpider):
             self.logger.info(f"Yielding Rightment item: {item}")
             yield item
             
-        # 检查分页信息
         total_pages = result.get('pages', 1)
         if current_page <= total_pages:
-            # 为下一页创建新的参数副本
             next_params = meta['params'].copy()
             next_params['pageNumber'] = current_page + 1
             next_url = os.getenv('RGT_URL') + urlencode(next_params, quote_via=quote)

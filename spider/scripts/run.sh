@@ -8,7 +8,7 @@ export PYTHONPATH=$CURRENT_DIR:$PYTHONPATH
 # supervisorctl can not automate create log
 touch /var/log/spider.error.log
 touch /var/log/spider.out.log
-chmod 666 /var/log/spider*.l
+chmod 666 /var/log/spider*.log
 
 # 检查 Poetry 是否安装
 if ! command -v poetry &> /dev/null; then

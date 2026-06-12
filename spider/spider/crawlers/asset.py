@@ -33,13 +33,12 @@ class Stock(BaseSpider):
         "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
         "AUTOTHROTTLE_MAX_DELAY": np.random.randint(20, 30),
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 1,
-        'DOWNLOAD_DELAY': np.random.randint(5, 10),  # Example setting: delay between requests
         'CONCURRENT_REQUESTS': 1,  # Example setting: number of concurrent requests
         # retry
         "RETRY_ENABLED": True,
         "RETRY_TIMES": 3,
         "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408, 429],
-        "HTTPERROR_ALLOWED_CODES": [301, 302],  # 避免对这些状态报错
+        "HTTPERROR_ALLOWED_CODES": [301, 302],  
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed
         # Middleware settings
@@ -51,39 +50,41 @@ class Stock(BaseSpider):
         "ITEM_PIPELINES": {
             'spider.pipelines.Asset': 400,
             'spider.pipelines.AsyncDb': 500,
+            'spider.pipelines.JsonlFeed': 600
         },
-        "FEEDS": {
-            "feeds/stock/%(name)s_%(time)s.json": {
-                "format": "json",
-                "encoding": "utf-8",
-                "indent": 4,
-            },
-        },
-        # 日志配置
+
+        # "FEED_EXPORTERS": {
+        #     "jsonlines": "spider.export.SafeJsonLinesExporter",
+        # },
+        # "FEEDS": {
+        #     "feeds/stock/%(name)s_%(time)s.json": {
+        #         "format": "json",
+        #         "encoding": "utf-8",
+        #         "indent": 4,
+        #     },
+        # },
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
-        "LOG_FILE": "logs/stock_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
+        "LOG_FILE": "logs/stock_%s.log" % datetime.now().strftime('%Y%m%d_%H%M%S'),
         "LOG_ENABLED": True,
-        "LOG_STDOUT": True,  # 同时输出到控制台
-        "LOG_SHORT_NAMES": True,  # 使用短名称
-        "LOGSTATS_INTERVAL": 60,  # 每60秒输出一次统计信息
-        "LOGSTATS_DUMP": True,  # 在爬虫关闭时输出统计信息
-        "LOGSTATS_LEVEL": "INFO",  # 统计信息的日志级别
-        "LOGSTATS_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",  # 统计信息的格式
-        "LOGSTATS_DATEFORMAT": "%Y-%m-%d %H:%M:%S",  # 统计信息的时间格式
+        "LOG_STDOUT": True,  
+        "LOG_SHORT_NAMES": True,  
+        "LOGSTATS_INTERVAL": 60,  
+        "LOGSTATS_DUMP": True,  
+        "LOGSTATS_LEVEL": "INFO",  
+        "LOGSTATS_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",  
+        "LOGSTATS_DATEFORMAT": "%Y-%m-%d %H:%M:%S",  
     }
-    asset_first_trading=0
+    asset_latest_date=0
 
     def preload(self, result): # used to filter
-        #import pdb; pdb.set_trace()
         if result:
-            self.asset_first_trading = int(result[0][0])
-            self.logger.info(f"Preload Asset ipo {result[0][0]}")
+            self.asset_latest_date = int(result[0][0])
+            self.logger.info(f"Preload Newest Asset TradingDay {result[0][0]}")
 
     # async def start(self):
     def start_requests(self):
-                # 使用 defer 机制处理异步操作
         adj_sql = """SELECT max(first_trading) FROM asset"""
         deferred = async_ops.on_query(adj_sql)
         deferred.addCallback(self.preload)

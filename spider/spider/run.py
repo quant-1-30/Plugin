@@ -26,23 +26,26 @@ runner = CrawlerRunner(get_project_settings())
 def crawl():
     try:
         print("Stock Spider Starting")
-        yield runner.crawl(Stock)
-        print("Benchmark Spider Starting")
-        yield runner.crawl(Benchmark)
+        yield runner.crawl(Stock) # Twisted Deferred
+
         print("Adjustment Spider Starting")
         yield runner.crawl(Adjustment)
+
         print("Rightment Spider Starting")
         yield runner.crawl(Rightment)
-        reactor.stop()
+
     except Exception as e:
         print(f"Spider Running Error: {e}")
     finally:
-        print("ready to stop reactor...")
-        # 确保停止 reactor
-        if reactor.running:
-            reactor.stop()
-        print("Reactor stopped.")
-
+            print("🧹 All spiders finished. Ready to check reactor status...")
+            if reactor.running:
+                try:
+                    reactor.stop()
+                    print("✅ Reactor stopped cleanly.")
+                except error.ReactorNotRunning:
+                    pass
+            else:
+                print("ℹ️ Reactor was not running or already stopped.")
 
 # @defer.inlineCallbacks
 # def crawl():     # 同时启动所有爬虫

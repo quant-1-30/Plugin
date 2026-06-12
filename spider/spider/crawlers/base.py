@@ -28,8 +28,8 @@ class BaseSpider(Spider):
     def from_crawler(cls, crawler, *args, **kwargs):
         spider = super(BaseSpider, cls).from_crawler(crawler, *args, **kwargs)
         
-        # routers = crawler.settings.getdict('META_URLS', {})  # 使用 getdict 而不是 get
-        # 如果没有配置，设置默认值
+        # routers = crawler.settings.getdict('META_URLS', {})  
+        
         # if not routers:
         #     spider.logger.warning(f"META_URLS not found in settings, using defaults")
         
@@ -54,10 +54,10 @@ class BaseSpider(Spider):
                 spider=self
             )
             if retry_req:
-                return retry_req  # ⚠️ 会在 Spider 方法中判断这个返回是否为 Request
+                return retry_req  # Spider Request
             else:
-                self.logger.error(f"[extract_json] 达到最大重试次数，放弃请求: {response.url}")
-                raise IgnoreRequest(f"放弃请求: {response.url}")
+                self.logger.error(f"[extract_json]: {response.url}")
+                raise IgnoreRequest(f"Ingore: {response.url}")
 
     def errback_httpbin(self, failure):
         """
@@ -70,10 +70,10 @@ class BaseSpider(Spider):
         - etc.
         """
         request = failure.request
-        # 记录错误日志
+        
         self.logger.error(f"[Error] Request failed: {request.url}")
         self.logger.error(f"[Error] Failure type: {failure.type.__name__}")
         self.logger.error(f"[Error] Reason: {repr(failure.value)}")
 
-        # 如果你已经设置了 RetryMiddleware，会自动调用 RetryMiddleware.process_exception
-        self.logger.warning(f"[Fail] Giving up on {request.url} after failure.") # 记录/计数/告警 标记失败，用于统计或通知
+        # RetryMiddleware ---> RetryMiddleware.process_exception
+        self.logger.warning(f"[Fail] Giving up on {request.url} after failure.") 

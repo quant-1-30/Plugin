@@ -39,7 +39,7 @@ class Benchmark(BaseSpider):
         "RETRY_ENABLED": True,
         "RETRY_TIMES": 3,
         "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408, 429],
-        "HTTPERROR_ALLOWED_CODES": [301, 302],  # 避免对这些状态报错
+        "HTTPERROR_ALLOWED_CODES": [301, 302],  
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed
         # Middleware settings
@@ -59,19 +59,19 @@ class Benchmark(BaseSpider):
                 "indent": 4,
             },
         },
-        # 日志配置
+        
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
         "LOG_FILE": "logs/benchmark_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
         "LOG_ENABLED": True,
-        "LOG_STDOUT": True,  # 同时输出到控制台
-        "LOG_SHORT_NAMES": True,  # 使用短名称
-        "LOGSTATS_INTERVAL": 60,  # 每60秒输出一次统计信息
-        "LOGSTATS_DUMP": True,  # 在爬虫关闭时输出统计信息
-        "LOGSTATS_LEVEL": "INFO",  # 统计信息的日志级别
-        "LOGSTATS_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",  # 统计信息的格式
-        "LOGSTATS_DATEFORMAT": "%Y-%m-%d %H:%M:%S",  # 统计信息的时间格式
+        "LOG_STDOUT": True,  
+        "LOG_SHORT_NAMES": True,  
+        "LOGSTATS_INTERVAL": 60,  
+        "LOGSTATS_DUMP": True,  
+        "LOGSTATS_LEVEL": "INFO",  
+        "LOGSTATS_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",  
+        "LOGSTATS_DATEFORMAT": "%Y-%m-%d %H:%M:%S",  
     }
     bench_data={}
 
@@ -83,7 +83,7 @@ class Benchmark(BaseSpider):
 
     # async def start(self):
     def start_requests(self):
-        # 使用 defer 机制处理异步操作
+        
         bench_sql = """
             WITH ranked_benchmark AS (
                 SELECT

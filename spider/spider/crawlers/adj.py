@@ -35,7 +35,6 @@ class Adjustment(BaseSpider):
         "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
         "AUTOTHROTTLE_MAX_DELAY": np.random.randint(20, 30),
         "AUTOTHROTTLE_TARGET_CONCURRENCY": 1,
-        'DOWNLOAD_DELAY': np.random.randint(5, 10),  # Example setting: delay between requests
         'CONCURRENT_REQUESTS': 1,  # Example setting: number of concurrent requests
         "DOWNLOAD_TIMEOUT": 20,
         # Add more custom settings as needed
@@ -48,35 +47,37 @@ class Adjustment(BaseSpider):
         "ITEM_PIPELINES": {
             'spider.pipelines.Adjustment': 400,
             'spider.pipelines.AsyncDb': 500,
+            'spider.pipelines.JsonlFeed': 600
         },
-        "FEEDS": {
-            "feeds/adj/%(name)s_%(time)s.json": {
-                "format": "json",
-                "encoding": "utf-8",
-                "indent": 4,
-            },
-        },
+
+        # "FEED_EXPORTERS": {
+        #     "jsonlines": "spider.export.SafeJsonLinesExporter",
+        # },
+        # "FEEDS": {
+        #     "feeds/adj/%(name)s_%(time)s.json": {
+        #         "format": "json",
+        #         "encoding": "utf-8",
+        #         "indent": 4,
+        #     },
+        # },
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
-        "LOG_FILE": "logs/adj_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
+        "LOG_FILE": "logs/adj_%s.log" % datetime.now().strftime('%Y%m%d_%H%M%S'),
         "LOG_ENABLED": True,
-        "LOG_STDOUT": True,  # 同时输出到控制台
-        "LOG_SHORT_NAMES": True,  # 使用短名称
-        "LOGSTATS_INTERVAL": 60,  # 每60秒输出一次统计信息
+        "LOG_STDOUT": True,  
+        "LOG_SHORT_NAMES": True,  
+        "LOGSTATS_INTERVAL": 60,  
     }
 
     adj_ex_date = {}
 
     def preload(self, result):
-        # import pdb; pdb.set_trace()
         if result:
             r_map = {r[0]: r[1] for r in result}
             self.adj_ex_date = r_map
 
-    # async def start(self):
     def start_requests(self):
-        # 使用 defer 机制处理异步操作
         adj_sql = """
             WITH ranked_adj AS (
                 SELECT
