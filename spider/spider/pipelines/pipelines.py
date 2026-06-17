@@ -30,11 +30,11 @@ from collections import namedtuple
 from sqlalchemy import text
 from datetime import datetime
 from scrapy.exceptions import DropItem  
+from spider.encoder import CustomFeedJsonEncoder
 
 from utils.tools import coerce_to_uint32
 from utils.operator import async_ops
-from spider.encoder import CustomFeedJsonEncoder
-
+from spider.constant import index_mapping
 
 
 __all__ = ['Asset', 'Adjustment', 'Rightment', 'AsyncDb', 'JsonlFeed', 'ParquetWriter']
@@ -305,21 +305,27 @@ class ParquetWriter(Pipeline):
         self.buffer = [] 
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        local_dt = pd.to_datetime(df["tick"]).dt.tz_localize("Asia/Shanghai")
+        df["datetime"] = pd.to_datetime(df["tick"]).dt.tz_localize("Asia/Shanghai")
  
         df["sid"] = df["sid"].str.replace(r'^[a-zA-Z]+\.|\.[a-zA-Z]+$', '', regex=True)
-        df["datetime"] = local_dt.dt.tz_convert("UTC")
+        df["sid"] = df["sid"].map(index_mapping) # .fillna(df["sid"])
+
+        # datetime64[ns, UTC] pandas extensionType --- pd.api.types.is_datetime64_any_dtype ---> int64
+        # nosemanic Parquet tick is int64 with Tableau, PowerBI , 1718637195 not 2026-06-17 15:13:15` /pd.to_datetime(df['tick'], unit='s')`
+        df["tick"] = (df["datetime"].dt.tz_convert("UTC").view("int64") // 10**9).astype("int64") 
+        # # tick 'datetime64[ns, UTC]' ---> 'datetime64[ns]' which is recgonized by pa.from_numpy_dtype 
+        # df["tick"] = df["datetime"].dt.tz_convert("UTC").dt.tz_localize(None)
         
         df["year"] = df["datetime"].dt.year.astype(str)
         df["quarter"] = df["datetime"].apply(lambda x: f'Q{((x.month - 1) // 3) + 1}')
         df["date"] = df["datetime"].dt.strftime("%Y%m")
+        df["datetime"] = df["datetime"].dt.tz_convert("UTC").dt.tz_localize(None) # same with rpc_feed node
         
         numeric_cols = ['open', 'close', 'high', 'low', 'volume', 'amount']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        return df.drop(columns=["tick"])
+        return df
 
     def _make_schema(self, df: pd.DataFrame) -> tuple:
         data_fields = []

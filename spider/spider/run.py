@@ -25,14 +25,14 @@ runner = CrawlerRunner(get_project_settings())
 @defer.inlineCallbacks
 def crawl():
     try:
-        # print("Stock Spider Starting")
-        # yield runner.crawl(Stock) # Twisted Deferred
+        print("Asset Spider Starting")
+        yield runner.crawl(Stock) # Twisted Deferred
 
-        # print("Adjustment Spider Starting")
-        # yield runner.crawl(Adjustment)
+        print("Adjustment Spider Starting")
+        yield runner.crawl(Adjustment)
 
-        # print("Rightment Spider Starting")
-        # yield runner.crawl(Rightment)
+        print("Rightment Spider Starting")
+        yield runner.crawl(Rightment)
         
         print("Benchmark Spider Starting")
         yield runner.crawl(Benchmark) 
