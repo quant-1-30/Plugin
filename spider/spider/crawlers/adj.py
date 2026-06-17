@@ -12,10 +12,11 @@ import numpy as np
 from datetime import datetime
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
+from scrapy import signals
 
 from pipelines.items import Dividend
 from crawlers.base import BaseSpider
-from utils.tools import quarter_date
+from utils.tools import quarter_date, get_adjacent_quarter
 from utils.operator import async_ops
 
 
@@ -72,12 +73,18 @@ class Adjustment(BaseSpider):
 
     adj_ex_date = {}
 
-    def preload(self, result):
-        if result:
-            r_map = {r[0]: r[1] for r in result}
-            self.adj_ex_date = r_map
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        """ bind spider_opened"""
+        spider = super().from_crawler(crawler, *args, **kwargs)
+        crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
+        return spider
 
-    def start_requests(self):
+    def spider_opened(self, spider):
+        """
+            Scrapy wait deferred than start_requests
+        """
+        self.logger.info("Initializing asset_latest_date from database...")
         adj_sql = """
             WITH ranked_adj AS (
                 SELECT
@@ -96,14 +103,23 @@ class Adjustment(BaseSpider):
         deferred = async_ops.on_query(adj_sql)
         deferred.addCallback(self.preload)
         # deferred.addErrback(self.on_query_error)
+        return deferred 
 
-        start_date = os.getenv('ADJ_START_UPDT', '1990-01-01') 
+    def preload(self, result):
+        if result:
+            r_map = {r[0]: r[1] for r in result}
+            self.adj_ex_date = r_map
+
+    def start_requests(self):
         base_params = {'sortColumns': 'REPORT_DATE',
                        'sortTypes': -1,
                        'pageSize': 50,
                        'pageNumber': 1,
                        'reportName': 'RPT_SHAREBONUS_DET',
                        'columns': 'ALL'}
+
+        start_date = get_adjacent_quarter(self.adj_ex_date)
+        self.logger.info(f"Adjustment Start_date : {start_date}")
 
         for report_date in quarter_date(start_date):
             self.logger.info(f"Report date: {report_date}")

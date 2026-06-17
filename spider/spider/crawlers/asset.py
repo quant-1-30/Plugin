@@ -12,6 +12,7 @@ import scrapy
 from datetime import datetime
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
+from scrapy import signals
 
 from pipelines.items import AssetItem
 from crawlers.base import BaseSpider
@@ -78,18 +79,42 @@ class Stock(BaseSpider):
     }
     asset_latest_date=0
 
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        """ bind spider_opened"""
+        spider = super().from_crawler(crawler, *args, **kwargs)
+        crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
+        return spider
+
+    def spider_opened(self, spider):
+        """
+            Scrapy wait deferred than start_requests
+        """
+        self.logger.info("Initializing asset_latest_date from database...")
+        asset_sql = """SELECT max(first_trading) FROM asset"""
+        deferred = async_ops.on_query(asset_sql)
+        deferred.addCallback(self.preload)
+        # deferred.addErrback(self.on_query_error)
+        return deferred  
+
     def preload(self, result): # used to filter
         if result:
             self.asset_latest_date = int(result[0][0])
             self.logger.info(f"Preload Newest Asset TradingDay {result[0][0]}")
 
     # async def start(self):
+    #     adj_sql = """SELECT max(first_trading) FROM asset"""
+    #     deferred = async_ops.on_query(adj_sql)
+    #     # Twisted Deferred  await
+    # from scrapy.utils.defer import maybe_deferred_to_future
+    #     result = await maybe_deferred_to_future(deferred)
+    #     self.preload(result)
+        
     def start_requests(self):
-        adj_sql = """SELECT max(first_trading) FROM asset"""
-        deferred = async_ops.on_query(adj_sql)
-        deferred.addCallback(self.preload)
+        # asset_sql = """SELECT max(first_trading) FROM asset"""
+        # deferred = async_ops.on_query(asset_sql)
+        # deferred.addCallback(self.preload)
         # deferred.addErrback(self.on_query_error)
-
         self.logger.info("Starting stock spider...")
         params = {'np': 1,
                   'fltt': 1,

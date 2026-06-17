@@ -18,7 +18,6 @@ from scrapy.item import Item, Field
 
 
 class AssetItem(Item):
-
     # 代码
     sid = Field()
     # 中文
@@ -27,11 +26,11 @@ class AssetItem(Item):
     first_trading = Field()
 
 
-class KlineItem(Item):
+class TickItem(Item):
     # 代码
     sid = Field()
     # 日期
-    date = Field()
+    tick = Field()
     # 开盘价
     open = Field()
     # 收盘价

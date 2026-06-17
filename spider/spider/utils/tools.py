@@ -7,7 +7,7 @@ Created on Tue Mar 12 15:37:47 2019
 """
 from datetime import datetime
 from logging import Logger
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 
 from scrapy.http.request import Request
 from scrapy.spiders import Spider
@@ -23,7 +23,7 @@ def coerce_to_uint32(a, scaling_factor):
 
 
 def quarter_date(sdate, fmt="%Y-%m-%d"):
-    """根据日期确定 dataset 路径"""
+    # 0331 / 0630 / 0930 / 1231
     sdate = datetime.strptime(str(sdate), fmt)
     edate = datetime.now()
     dates = []
@@ -31,28 +31,53 @@ def quarter_date(sdate, fmt="%Y-%m-%d"):
     end_year = edate.year
     
     while current_year <= end_year:
-        # 3月31日
         march_date = datetime(current_year, 3, 31)
-        if sdate <= march_date <= edate:  # 只添加已经过去的日期
+        if sdate <= march_date <= edate:  
             dates.append(march_date.strftime(fmt))
 
-        # 6月30日
         june_date = datetime(current_year, 6, 30)
-        if sdate <= june_date <= edate:  # 只添加已经过去的日期
+        if sdate <= june_date <= edate:  
             dates.append(june_date.strftime(fmt))
         
-        # 9月30日
         sept_date = datetime(current_year, 9, 30)
-        if sdate <= sept_date <= edate:  # 只添加已经过去的日期
+        if sdate <= sept_date <= edate:  
             dates.append(sept_date.strftime(fmt))
         
-        # 12月31日
         dec_date = datetime(current_year, 12, 31)
-        if sdate <= dec_date <= edate:  # 只添加已经过去的日期
+        if sdate <= dec_date <= edate:  
             dates.append(dec_date.strftime(fmt))
         
         current_year += 1
     return dates
+
+
+def get_adjacent_quarter(adj_ex_date: Dict[str, int], offset: int=1):
+        """
+            03-31 / 06-30 / 09-30 / 12-31
+        """
+        if not adj_ex_date:
+            return '1990-01-01'
+
+        max_ex_date = max(adj_ex_date.values())
+        try:
+            max_date = datetime.strptime(str(max_ex_date), '%Y%m%d')
+            near_date = max_date.replace(year=max_date.year - offset)
+        except Exception as e:
+            return '1990-01-01'
+
+        year = near_date.year
+        if near_date >= datetime(year, 12, 31):
+            start_date_obj = datetime(year, 12, 31)
+        elif near_date >= datetime(year, 9, 30):
+            start_date_obj = datetime(year, 9, 30)
+        elif near_date >= datetime(year, 6, 30):
+            start_date_obj = datetime(year, 6, 30)
+        elif near_date >= datetime(year, 3, 31):
+            start_date_obj = datetime(year, 3, 31)
+        else:
+            start_date_obj = datetime(year - 1, 12, 31)
+
+        return start_date_obj.strftime('%Y-%m-%d')
 
 
 def get_retry_request(

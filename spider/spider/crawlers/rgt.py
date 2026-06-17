@@ -11,6 +11,7 @@ import numpy as np
 
 from datetime import datetime
 from scrapy.loader import ItemLoader
+from scrapy import signals
 from urllib.parse import urlencode, quote
 
 from pipelines.items import Right
@@ -70,14 +71,18 @@ class Rightment(BaseSpider):
 
     rgt_ex_date = {}
 
-    def preload(self, result):
-        # retrieve from database
-        if result:
-            r_map = {r[0]: r[1] for r in result}
-            self.rgt_ex_date = r_map
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        """ bind spider_opened"""
+        spider = super().from_crawler(crawler, *args, **kwargs)
+        crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
+        return spider
 
-    # async def start(self):
-    def start_requests(self):
+    def spider_opened(self, spider):
+        """
+            Scrapy wait deferred than start_requests
+        """
+        self.logger.info("Initializing asset_latest_date from database...")
         rgt_sql = """
             WITH ranked_rgt AS (
                 SELECT
@@ -96,7 +101,15 @@ class Rightment(BaseSpider):
         deferred = async_ops.on_query(rgt_sql)
         deferred.addCallback(self.preload)
         # deferred.addErrback(self.on_query_error)
+        return deferred 
 
+    def preload(self, result):
+        # retrieve from database
+        if result:
+            r_map = {r[0]: r[1] for r in result}
+            self.rgt_ex_date = r_map
+
+    def start_requests(self):
         params = {'sortColumns': 'EQUITY_RECORD_DATE',
                   'sortTypes': -1,
                   'pageSize': 50,

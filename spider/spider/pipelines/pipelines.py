@@ -18,6 +18,10 @@ import json
 import asyncio
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.dataset as ds
+
+from pathlib import Path
 from toolz import valmap
 from scrapy import signals
 # Deferred  to aviod block main thread
@@ -32,7 +36,8 @@ from utils.operator import async_ops
 from spider.encoder import CustomFeedJsonEncoder
 
 
-__all__ = ['Asset', 'Adjustment', 'Rightment', 'AsyncDb', 'JsonlFeed']
+
+__all__ = ['Asset', 'Adjustment', 'Rightment', 'AsyncDb', 'JsonlFeed', 'ParquetWriter']
 
 
 namedData = namedtuple('namedData', ['table_name', 'item'])
@@ -261,3 +266,91 @@ class JsonlFeed(Pipeline):
         line = json.dumps(dict(item), indent=4, cls=CustomFeedJsonEncoder, ensure_ascii=False) + "\n"
         self.file.write(line)
         return item
+
+
+class ParquetWriter(Pipeline):
+    def __init__(self, dataset_root):
+        self.dataset_root = dataset_root
+        self.buffer = []
+        self.partition_cols = ["year", "quarter", "sid", "date"]
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        instance =cls(
+            dataset_root=crawler.settings.get("dataset_root", "data/benchmark")
+        )
+        instance.logger = crawler.spider.logger
+        return instance
+
+    def open_spider(self, spider):
+        os.makedirs(self.dataset_root, exist_ok=True)
+
+    def process_item(self, item, spider):
+        processed_item = {k: v[0] if isinstance(v, list) else v for k, v in dict(item).items()}
+        self.buffer.append(processed_item)
+        return item
+
+    def close_spider(self, spider):
+        if not self.buffer:
+            return
+
+        self.logger.info(f"Scraped {len(self.buffer)} total rows. Starting group-by sid processing...")
+
+        df = pd.DataFrame(self.buffer)
+        df = self._prepare_dataframe(df)
+
+        # PyArrow write_dataset group-by sid
+        self._write_to_parquet(df, spider.name)
+        
+        self.buffer = [] 
+
+    def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        local_dt = pd.to_datetime(df["tick"]).dt.tz_localize("Asia/Shanghai")
+ 
+        df["sid"] = df["sid"].str.replace(r'^[a-zA-Z]+\.|\.[a-zA-Z]+$', '', regex=True)
+        df["datetime"] = local_dt.dt.tz_convert("UTC")
+        
+        df["year"] = df["datetime"].dt.year.astype(str)
+        df["quarter"] = df["datetime"].apply(lambda x: f'Q{((x.month - 1) // 3) + 1}')
+        df["date"] = df["datetime"].dt.strftime("%Y%m")
+        
+        numeric_cols = ['open', 'close', 'high', 'low', 'volume', 'amount']
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        return df.drop(columns=["tick"])
+
+    def _make_schema(self, df: pd.DataFrame) -> tuple:
+        data_fields = []
+        for col in df.columns.difference(self.partition_cols):
+            if col == "datetime":
+                # data_fields.append(pa.field(col, pa.timestamp("ms"))) # default unix utc
+                data_fields.append(pa.field(col, pa.timestamp("ms", tz="UTC"))) 
+            else:
+                data_fields.append(pa.field(col, pa.from_numpy_dtype(df[col].dtype)))
+        
+        partition_fields = [pa.field(col, pa.string()) for col in self.partition_cols]
+        return pa.schema(data_fields + partition_fields), pa.schema(partition_fields)
+
+    def _write_to_parquet(self, df: pd.DataFrame, spider_name: str) -> bool:
+        """PyArrow write_dataset group by sid """
+        try:
+            schema, partition_schema = self._make_schema(df)
+            table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
+
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            basename_template = f"daily_{spider_name}_{now_str}_{{i}}.parquet"
+
+            ds.write_dataset(
+                data=table,
+                base_dir=self.dataset_root,
+                format="parquet",
+                partitioning=ds.partitioning(partition_schema, flavor="hive"),
+                basename_template=basename_template,
+                existing_data_behavior="overwrite_or_ignore"
+            )
+        except Exception as e:
+            self.logger.error(f"PyArrow Write Error: {e}")
+        finally:
+            return 
