@@ -68,8 +68,10 @@ class Rightment(BaseSpider):
         "LOG_SHORT_NAMES": True,  
         "LOGSTATS_INTERVAL": 60,  
     }
-
-    rgt_ex_date = {}
+    
+    def __init__(self, *args, **kwargs):
+        self.rgt_ex_date = {}
+        super().__init__(*args, **kwargs)
 
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
@@ -165,7 +167,7 @@ class Rightment(BaseSpider):
             yield item
             
         total_pages = result.get('pages', 1)
-        if current_page <= total_pages:
+        if current_page < total_pages:
             next_params = meta['params'].copy()
             next_params['pageNumber'] = current_page + 1
             next_url = os.getenv('RGT_URL') + urlencode(next_params, quote_via=quote)
@@ -176,5 +178,5 @@ class Rightment(BaseSpider):
                                 dont_filter=True,
                                 errback=self.errback_httpbin)
         else:
-            self.logger.info(f"Completed all {total_pages} pages for {meta['params']['filter']}")
+            self.logger.info(f"Completed all {total_pages} pages for {meta['params'].get('filter', 'N/A')}")
                 

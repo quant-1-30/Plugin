@@ -2,143 +2,16 @@
 #
 # See documentation in:
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
-# useful for handling different item types with a single interface
 
 import collections
 import logging
-from scrapy.exceptions import IgnoreRequest
-
-from urllib.parse import unquote, urlunparse
-from urllib.request import getproxies, proxy_bypass, _parse_proxy
-
-from scrapy.utils.httpobj import urlparse_cached
-from scrapy.utils.python import to_bytes
-
-from email.utils import formatdate
-from typing import Optional, Type, TypeVar
-
-from twisted.internet import defer
-from twisted.internet.error import (
-    ConnectError,
-    ConnectionDone,
-    ConnectionLost,
-    ConnectionRefusedError,
-    DNSLookupError,
-    TCPTimedOutError,
-    TimeoutError,
-)
-
-from twisted.web.client import ResponseFailed
 
 from scrapy import signals
-from scrapy.crawler import Crawler
-from scrapy.http.request import Request
-from scrapy.http.response import Response
-from scrapy.settings import Settings
-from scrapy.spiders import Spider
-from scrapy.statscollectors import StatsCollector
-from scrapy.utils.misc import load_object
-
-from collections import defaultdict
-
-from scrapy.exceptions import NotConfigured
-from scrapy.http import Response
-from scrapy.http.cookies import CookieJar
-from scrapy.utils.python import to_unicode
-from logging import getLogger, Logger
-from typing import Optional, Union
-
-from twisted.internet import defer
-from twisted.internet.error import (
-    ConnectError,
-    ConnectionDone,
-    ConnectionLost,
-    ConnectionRefusedError,
-    DNSLookupError,
-    TCPTimedOutError,
-    TimeoutError,
-)
-from twisted.web.client import ResponseFailed
-
-from scrapy.core.downloader.handlers.http11 import TunnelError
-from scrapy.exceptions import NotConfigured
-from scrapy.http.request import Request
-from scrapy.spiders import Spider
-from scrapy.utils.python import global_object_name
-from scrapy.utils.response import response_status_message
-from w3lib.http import basic_auth_header
-
-
-retry_logger = getLogger(__name__)
+from scrapy.exceptions import IgnoreRequest, NotConfigured
 
 logger = logging.getLogger(__name__)
 
-
 __all__ = ['ErrorSpiderMiddleware', 'HttpErrorMiddleware']
-
-# filter response
-class SpiderSpiderMiddleware:
-    # Not all methods need to be defined. If a method is not defined,
-    # scrapy acts as if the spider middleware does not modify the
-    # passed objects.
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        # This method is used by Scrapy to create your spiders.
-        s = cls()
-        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
-        return s
-
-    def process_spider_input(self, response, spider):
-        # Called for each response that goes through the spider
-        # middleware and into the spider.
-
-        # Should return None or raise an exception.
-        return None
-
-    async def process_spider_output(self, response, result, spider):
-        # Called with the results returned from the Spider, after
-        # it has processed the response.
-
-        # Must return an iterable of Request, or item objects.
-        # result 可能是异步生成器（async generator），我们需要异步迭代
-        if isinstance(result, collections.AsyncIterable):
-            async for r in result:
-                yield r
-        else:
-            for r in result:
-                yield r
-
-    def process_spider_exception(self, response, exception, spider):
-        # Called when a spider or process_spider_input() method
-        # (from other spider middleware) raises an exception.
-
-        # Should return either None or an iterable of Request or item objects.
-        pass
-
-    def process_start_requests(self, start_requests, spider):
-        # Called with the start requests of the spider, and works
-        # similarly to the process_spider_output() method, except
-        # that it doesn't have a response associated.
-
-        # Must return only requests (not items).
-        for r in start_requests:
-            yield r
-
-    def spider_opened(self, spider):
-        spider.logger.info('Spider opened: %s' % spider.name)
-
-
-class ErrorSpiderMiddleware:
-    handle_httpstatus_list = [301, 302, 456, 500, 502, 503, 504, 522, 524, 408, 429]
-
-    async def process_spider_output(self, response, result, spider):
-        if response.status in self.handle_httpstatus_list:
-            spider.logger.error(f"Received error status {response.status} for {response.url}")
-            return
-        
-        async for item in result:
-            yield item
 
 
 class HttpError(IgnoreRequest):
@@ -147,6 +20,55 @@ class HttpError(IgnoreRequest):
     def __init__(self, response, *args, **kwargs):
         self.response = response
         super().__init__(*args, **kwargs)
+
+
+class SpiderSpiderMiddleware:
+    @classmethod
+    def from_crawler(cls, crawler):
+        s = cls()
+        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
+        return s
+
+    def process_spider_input(self, response, spider):
+        return None
+
+    async def process_spider_output(self, response, result, spider):
+        # result async generator
+        if isinstance(result, collections.AsyncIterable):
+            async for r in result:
+                yield r
+        else:
+            for r in result:
+                yield r
+
+    def process_spider_exception(self, response, exception, spider):
+        return None
+
+    def process_start_requests(self, start_requests, spider):
+        for r in start_requests:
+            yield r
+
+    def spider_opened(self, spider):
+        spider.logger.info('Spider opened: %s' % spider.name)
+
+
+class ErrorSpiderMiddleware:
+    """record status not abandon item/request"""
+
+    handle_httpstatus_list = [456, 500, 502, 503, 504, 522, 524, 408, 429]
+
+    async def process_spider_output(self, response, result, spider):
+        if response.status in self.handle_httpstatus_list:
+            spider.logger.error(
+                f"Received error status {response.status} for {response.url}"
+            )
+        # item/request
+        if isinstance(result, collections.abc.AsyncIterable):
+            async for item in result:
+                yield item
+        else:
+            for item in result:
+                yield item
 
 
 class HttpErrorMiddleware:
@@ -186,3 +108,4 @@ class HttpErrorMiddleware:
                 {'response': response}, extra={'spider': spider},
             )
             return []
+        return None

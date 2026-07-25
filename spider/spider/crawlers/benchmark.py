@@ -64,7 +64,7 @@ class Benchmark(BaseSpider):
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
-        "LOG_FILE": "logs/benchmark_%s.log" % datetime.now().strftime('%Y%m%d_%H:%M:%S'),
+        "LOG_FILE": "logs/benchmark_%s.log" % datetime.now().strftime('%Y%m%d_%H%M%S'),
         "LOG_ENABLED": True,
         "LOG_STDOUT": True,  
         "LOG_SHORT_NAMES": True,  

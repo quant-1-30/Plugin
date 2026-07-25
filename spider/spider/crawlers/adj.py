@@ -70,8 +70,11 @@ class Adjustment(BaseSpider):
         "LOG_SHORT_NAMES": True,  
         "LOGSTATS_INTERVAL": 60,  
     }
+    
+    def __init__(self, *args, **kwargs):
+        self.adj_ex_date = {}
+        super().__init__(*args, **kwargs)
 
-    adj_ex_date = {}
 
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
@@ -145,15 +148,14 @@ class Adjustment(BaseSpider):
         self.logger.info(f"Adjustment content: {content}")
         result = content['result']
         if not result or not result.get('data'):
-            self.logger.info(f"No dividend data found for date (filter: {meta['params']['filter']})")
+            self.logger.info(f"No dividend data found for date (filter: {meta['params'].get('filter', 'N/A')})")
             if result:
-                self.logger.debug(f"Result keys for {meta['params']['filter']}: {list(result.keys())}")
+                self.logger.debug(f"Result keys for {meta['params'].get('filter', 'N/A')}: {list(result.keys())}")
                 self.logger.debug(f"Total pages info: {result.get('pages', 'N/A')}")
             else:
-                self.logger.warning(f"Empty result for {meta['params']['filter']}")
+                self.logger.warning(f"Empty result for {meta['params'].get('filter', 'N/A')}")
             return
               
-        # 记录找到的数据数量
         data_count = len(result['data'])
         report_date = meta.get('report_date', 'unknown date')
         current_page = meta['params']['pageNumber']
@@ -172,17 +174,16 @@ class Adjustment(BaseSpider):
             self.logger.info(f"Yielding Adjustment item: {item}")
             yield item
 
-        # 检查分页信息
+        # check pagenumber
         total_pages = result.get('pages', 1)
-        if current_page <= total_pages:
-            # 为下一页创建新的参数副本
+        if current_page < total_pages:
             next_params = meta['params'].copy()
             next_params['pageNumber'] = current_page + 1
             next_url = os.getenv('ADJ_URL') + urlencode(next_params, quote_via=quote)
-            self.logger.info(f"Loading page {next_params['pageNumber']}/{total_pages} for {meta['params']['filter']}")
+            self.logger.info(f"Loading page {next_params['pageNumber']}/{total_pages} for {meta['params'].get('filter', 'N/A')}")
             yield scrapy.Request(next_url, 
                                  callback=self.parse, 
                                  meta={'params': next_params}, 
                                  dont_filter=True)
         else:
-            self.logger.info(f"Completed all {total_pages} pages for {meta['params']['filter']}")
+            self.logger.info(f"Completed all {total_pages} pages for {meta['params'].get('filter', 'N/A')}")

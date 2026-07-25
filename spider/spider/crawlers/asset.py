@@ -77,7 +77,9 @@ class Stock(BaseSpider):
         "LOGSTATS_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",  
         "LOGSTATS_DATEFORMAT": "%Y-%m-%d %H:%M:%S",  
     }
-    asset_latest_date=0
+    def __init__(self, *args, **kwargs):
+        self.asset_latest_date = 0
+        super().__init__(*args, **kwargs)
 
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):

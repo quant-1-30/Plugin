@@ -4,7 +4,7 @@ from twisted.internet import asyncioreactor
 asyncioreactor.install() # not new_event_loop() / get_event_loop()
 
 # default is twisted.internet.selectreactor.SelectReactor
-from twisted.internet import reactor, defer
+from twisted.internet import reactor, defer, error
 from scrapy.crawler import CrawlerRunner
 # from scrapy.crawler import CrawlerProcess
 from scrapy.utils.log import configure_logging
@@ -48,40 +48,13 @@ def crawl():
                 except error.ReactorNotRunning:
                     pass
             else:
-                print("ℹ️ Reactor was not running or already stopped.")
-
-
-# @defer.inlineCallbacks
-# def crawl():     # 同时启动所有爬虫
-#     deferred_list = [
-#         runner.crawl(Stock),
-#         runner.crawl(Adjustment), 
-#         runner.crawl(Rightment)
-#     ]
-    
-#     yield defer.DeferredList(deferred_list)
-#     print("所有爬虫并发执行完成")
-#     reactor.stop()
-
-
-# def crawl():
-#     process = CrawlerProcess(get_project_settings())
-    
-#     process.crawl(Stock)
-#     process.crawl(Adjustment) 
-#     process.crawl(Rightment)
-    
-#     print("并发执行爬虫...")
-#     process.start()  # 会自动并发执行所有爬虫
-#     print("所有爬虫执行完成")
+                print("Reactor was not running or already stopped.")
 
 
 if __name__ == '__main__':
 
     load_dotenv()
-    # 创建一个 deferred 对象来跟踪爬虫的完成
-    d = crawl()
-    # 添加错误处理
+
+    d = crawl()  # deferred to track spider
     d.addErrback(lambda f: f.printTraceback())
-    # 运行 reactor
     reactor.run()

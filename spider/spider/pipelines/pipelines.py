@@ -33,7 +33,7 @@ from scrapy.exceptions import DropItem
 from spider.encoder import CustomFeedJsonEncoder
 
 from utils.tools import coerce_to_uint32
-from utils.operator import async_ops
+from utils.operator import async_ops, _get_reactor_loop
 from spider.constant import index_mapping
 
 
@@ -158,12 +158,7 @@ class AsyncDb(Pipeline):
         instance.logger = crawler.spider.logger
 
         if cls._loop is None:
-        # avoid attached to a different loop
-            try:
-                cls._loop = asyncio.get_event_loop()
-            except RuntimeError:
-                cls._loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(cls._loop)
+            cls._loop = _get_reactor_loop()
         
         instance._loop = cls._loop
         return instance
@@ -172,7 +167,7 @@ class AsyncDb(Pipeline):
         self.batch_size = batch_size
         self.max_retry = max_retry
         self.flush_interval = flush_interval
-        self.queue = asyncio.Queue() # asyncio.lock
+        self.queue = None  # defer to open_spider
         self.buffer = []
         self.logger = None
         self._worker_task = None
@@ -180,7 +175,7 @@ class AsyncDb(Pipeline):
         self._loop = None
 
     def open_spider(self, spider):
-        # 启动后台消费者任务 / concurrent.futures.Future object
+        self.queue = asyncio.Queue()
         self._worker_task = asyncio.run_coroutine_threadsafe(self._consume_loop(spider), self._loop)
         self.logger.info(f"AsyncDb for {spider.name} started with new event loop")
 
@@ -260,7 +255,10 @@ class JsonlFeed(Pipeline):
         self.file = open(f"feeds/jsonl/{spider.name}_{time_str}.jsonl", "w", encoding="utf-8")
 
     def close_spider(self, spider):
-        self.file.close()
+        try:
+            self.file.close()
+        except Exception:
+            pass
 
     def process_item(self, item, spider):
         line = json.dumps(dict(item), indent=4, cls=CustomFeedJsonEncoder, ensure_ascii=False) + "\n"
@@ -308,11 +306,11 @@ class ParquetWriter(Pipeline):
         df["datetime"] = pd.to_datetime(df["tick"]).dt.tz_localize("Asia/Shanghai")
  
         df["sid"] = df["sid"].str.replace(r'^[a-zA-Z]+\.|\.[a-zA-Z]+$', '', regex=True)
-        df["sid"] = df["sid"].map(index_mapping) # .fillna(df["sid"])
+        df["sid"] = df["sid"].map(index_mapping).fillna(df["sid"])
 
         # datetime64[ns, UTC] pandas extensionType --- pd.api.types.is_datetime64_any_dtype ---> int64
         # nosemanic Parquet tick is int64 with Tableau, PowerBI , 1718637195 not 2026-06-17 15:13:15` /pd.to_datetime(df['tick'], unit='s')`
-        df["tick"] = (df["datetime"].dt.tz_convert("UTC").view("int64") // 10**9).astype("int64") 
+        df["tick"] = (df["datetime"].dt.tz_convert("UTC").astype("int64") // 10**9).astype("int64") 
         # # tick 'datetime64[ns, UTC]' ---> 'datetime64[ns]' which is recgonized by pa.from_numpy_dtype 
         # df["tick"] = df["datetime"].dt.tz_convert("UTC").dt.tz_localize(None)
         
@@ -357,6 +355,6 @@ class ParquetWriter(Pipeline):
                 existing_data_behavior="overwrite_or_ignore"
             )
         except Exception as e:
-            self.logger.error(f"PyArrow Write Error: {e}")
-        finally:
-            return 
+            self.logger.error(f"PyArrow Write Error: {e}", exc_info=True)
+            raise
+
