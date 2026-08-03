@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.plugin.spider.plist — macOS LaunchAgent 定时任务模板
+
+  功能：每个交易日（周一到周五）16:30 自动运行 spider/scripts/run.sh
+  适用：A股 15:00 收盘后留 30 分钟余量，抓取当日数据
+
+  ===== 使用步骤 =====
+  1. 拷贝到 LaunchAgents 目录：
+       cp spider/scripts/com.plugin.spider.plist ~/Library/LaunchAgents/
+  2. 加载：
+       launchctl load ~/Library/LaunchAgents/com.plugin.spider.plist
+  3. 立即手动触发一次（测试）：
+       launchctl start com.plugin.spider
+  4. 查看状态：
+       launchctl list | grep plugin
+  5. 卸载：
+       launchctl unload ~/Library/LaunchAgents/com.plugin.spider.plist
+
+  ===== 排错 =====
+  - 日志位置：~/Library/Logs/spider/spider.{out,error}.log
+  - 若任务不触发：确认系统设置 → 通用 → 登录项 中允许该 LaunchAgent 运行
+  - 若 PATH 找不到 poetry：run.sh 已 export 常见路径；如自定义位置请改 run.sh
+  - 验证 plist 语法：plutil -lint ~/Library/LaunchAgents/com.plugin.spider.plist
+
+  注意：如果修改了本文件，需先 unload 再 load 才会生效。
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.plugin.spider</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/hengxinliu/startup/Plugin/spider/scripts/run.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/hengxinliu/startup/Plugin/spider</string>
+
+    <!-- 定时：周一到周五 16:30（local time）-->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Minute</key>
+        <integer>30</integer>
+        <key>Hour</key>
+        <integer>16</integer>
+        <key>Weekday</key>
+        <array>
+            <integer>1</integer>
+            <integer>2</integer>
+            <integer>3</integer>
+            <integer>4</integer>
+            <integer>5</integer>
+        </array>
+    </dict>
+
+    <!-- 如果错过了运行时间（电脑关机/睡眠），唤醒后补跑一次 -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- 日志 -->
+    <key>StandardOutPath</key>
+    <string>/Users/hengxinliu/Library/Logs/spider/spider.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/hengxinliu/Library/Logs/spider/spider.error.log</string>
+
+    <!-- 进程意外退出不自动重启（避免爬虫失败后无限重跑）-->
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>

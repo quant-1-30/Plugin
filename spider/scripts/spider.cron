@@ -1,0 +1,36 @@
+# =====================================================================
+# spider.cron — Linux crontab 定时任务片段
+#
+# 功能：每个交易日（周一到周五）16:30 自动运行 spider/scripts/run.sh
+# 适用：A股 15:00 收盘后留 30 分钟余量，抓取当日数据
+#
+# ===== 使用步骤 =====
+# 方式 A（替换你现有的 crontab）：
+#     crontab spider/scripts/spider.cron
+#
+# 方式 B（追加到已有 crontab，推荐）：
+#     (crontab -l 2>/dev/null; cat spider/scripts/spider.cron | grep -v '^#') | crontab -
+#
+# 方式 C（手动编辑）：
+#     crontab -e
+#     然后把下面非注释行粘贴进去
+#
+# ===== 排错 =====
+# - cron 日志：/var/log/syslog (Debian/Ubuntu) 或 /var/log/cron (RHEL/CentOS)
+# - 爬虫日志：$SPIDER_LOG_DIR（默认 $HOME/Library/Logs/spider，Linux 建议改为 /var/log/spider）
+# - cron 的 PATH 极简，run.sh 已 export 常见路径；如有自定义 poetry 位置请改 run.sh
+# - crontab -l 查看当前所有定时任务
+# =====================================================================
+
+# 环境变量（cron 默认不加载 .profile/.bashrc，需在此显式声明）
+SHELL=/bin/bash
+# PATH 必须包含 poetry 所在目录，常见位置都列上（与 run.sh 探测逻辑保持一致）
+PATH=/Library/Frameworks/Python.framework/Versions/3.11/bin:/Library/Frameworks/Python.framework/Versions/3.12/bin:/Library/Frameworks/Python.framework/Versions/3.13/bin:$HOME/.local/bin:$HOME/.local/share/pypoetry/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+# Linux 下建议把日志写到 /var/log/spider 或项目 logs 目录
+SPIDER_LOG_DIR=/var/log/spider
+# 如果 .env 不在默认搜索路径，显式指定（run.py 会 load_dotenv()）
+# SPIDER_PROJECT_DIR=/opt/Plugin/spider
+
+# 分 时 日 月 周    命令
+# 30 16 * * 1-5 : 每天 16:30，周一到周五
+30 16 * * 1-5  /bin/bash /opt/Plugin/spider/scripts/run.sh >> /var/log/spider/cron.log 2>&1
