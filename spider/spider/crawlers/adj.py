@@ -7,15 +7,13 @@ Created on Tue Mar 12 15:37:47 2019
 """
 import os
 import scrapy
-import numpy as np
 
-from datetime import datetime
 from urllib.parse import urlencode, quote
 from scrapy.loader import ItemLoader
 from scrapy import signals
 
 from pipelines.items import Dividend
-from crawlers.base import BaseSpider
+from crawlers.base import BaseSpider, build_spider_settings
 from utils.tools import quarter_date, get_adjacent_quarter
 from utils.operator import async_ops
 
@@ -27,112 +25,77 @@ class Adjustment(BaseSpider):
 
     name = 'adjustment'
     table_name = "adjustment"
-    allowed_domains = ['push2.eastmoney.com', 'finance.sina.com.cn', 'push2his.eastmoney.com']
-    handle_httpstatus_list = [301, 302]
     
-    # override settings
-    custom_settings = {
-        "AUTOTHROTTLE_ENABLED": True,
-        "AUTOTHROTTLE_START_DELAY": np.random.randint(5, 10),
-        "AUTOTHROTTLE_MAX_DELAY": np.random.randint(20, 30),
-        "AUTOTHROTTLE_TARGET_CONCURRENCY": 1,
-        'CONCURRENT_REQUESTS': 1,  # Example setting: number of concurrent requests
-        "DOWNLOAD_TIMEOUT": 20,
-        # Add more custom settings as needed
-        # Middleware settings
-        "DOWNLOADER_MIDDLEWARES": {
-            # 'spider.middlewares.HttpProxyMiddleware': 100,
-            'spider.middlewares.UserAgentMiddleware': 200,
-            'spider.middlewares.CustomRetryMiddleware': 300,
-        },
-        "ITEM_PIPELINES": {
+    custom_settings = build_spider_settings(
+        log_prefix="adj",
+        item_pipelines={
             'spider.pipelines.Adjustment': 400,
             'spider.pipelines.AsyncDb': 500,
-            'spider.pipelines.JsonlFeed': 600
+            'spider.pipelines.JsonlFeed': 600,
         },
-
-        # "FEED_EXPORTERS": {
-        #     "jsonlines": "spider.export.SafeJsonLinesExporter",
-        # },
-        # "FEEDS": {
-        #     "feeds/adj/%(name)s_%(time)s.json": {
-        #         "format": "json",
-        #         "encoding": "utf-8",
-        #         "indent": 4,
-        #     },
-        # },
-        "LOG_LEVEL": "INFO",
-        "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
-        "LOG_FILE": "logs/adj_%s.log" % datetime.now().strftime('%Y%m%d_%H%M%S'),
-        "LOG_ENABLED": True,
-        "LOG_STDOUT": True,  
-        "LOG_SHORT_NAMES": True,  
-        "LOGSTATS_INTERVAL": 60,  
-    }
+    )
     
     def __init__(self, *args, **kwargs):
         self.adj_ex_date = {}
+        self.adj_known_keys = set()
         super().__init__(*args, **kwargs)
-
 
     @classmethod
     def from_crawler(cls, crawler, *args, **kwargs):
-        """ bind spider_opened"""
         spider = super().from_crawler(crawler, *args, **kwargs)
         crawler.signals.connect(spider.spider_opened, signal=signals.spider_opened)
         return spider
 
     def spider_opened(self, spider):
-        """
-            Scrapy wait deferred than start_requests
-        """
-        self.logger.info("Initializing asset_latest_date from database...")
-        adj_sql = """
-            WITH ranked_adj AS (
-                SELECT
-                    sid,
-                    ex_date,
-                    ROW_NUMBER() OVER (PARTITION BY sid ORDER BY ex_date DESC) as rn
-                FROM adjustment
-            )
-            SELECT
-                sid,
-                ex_date
-            FROM ranked_adj
-            WHERE rn = 1
-            ORDER BY sid DESC, ex_date DESC;
-        """
-        deferred = async_ops.on_query(adj_sql)
-        deferred.addCallback(self.preload)
-        # deferred.addErrback(self.on_query_error)
-        return deferred 
+        self.logger.info("Initializing adjustment latest ex_date from database...")
+        return async_ops.query_latest_ex_dates(
+            self.table_name,
+            self.preload,
+            errback=self.on_watermark_error,
+        )
 
     def preload(self, result):
-        if result:
-            r_map = {r[0]: r[1] for r in result}
-            self.adj_ex_date = r_map
+        self.adj_ex_date, self.adj_known_keys = self._build_ex_date_watermarks(result)
+
+    async def start(self):
+        async for req in super().start():
+            yield req
 
     def start_requests(self):
-        base_params = {'sortColumns': 'REPORT_DATE',
+        self._check_watermark_ready()
+        base_params = {'sortColumns': 'EX_DIVIDEND_DATE',
                        'sortTypes': -1,
-                       'pageSize': 50,
+                       'pageSize': 500,
                        'pageNumber': 1,
                        'reportName': 'RPT_SHAREBONUS_DET',
                        'columns': 'ALL'}
 
-        start_date = get_adjacent_quarter(self.adj_ex_date)
-        self.logger.info(f"Adjustment Start_date : {start_date}")
+        if self.adj_ex_date:
+            # 增量模式：按 EX_DIVIDEND_DATE 服务端过滤，覆盖往期年报/中报晚实施除权的分红且无需逐季度轮询
+            start_date = get_adjacent_quarter(self.adj_ex_date, offset=0)
+            self.logger.info(f"Adjustment incremental EX_DIVIDEND_DATE >= {start_date}")
+            params = base_params.copy()
+            params['filter'] = f"(EX_DIVIDEND_DATE>='{start_date}')"
+            start_url = os.getenv('ADJ_URL') + urlencode(params, quote_via=quote)
+            self.logger.info(f"Start url: {start_url}")
+            yield scrapy.Request(start_url, callback=self.parse,
+                                 meta={'params': params, 'report_date': f">={start_date}"},
+                                 errback=self.errback_httpbin,
+                                 dont_filter=True)
+            return
 
+        # 首次空表引导：按 REPORT_DATE 季度枚举全历史
+        start_date = '1990-01-01'
+        self.logger.info(f"Adjustment bootstrap Start_date : {start_date}")
         for report_date in quarter_date(start_date):
             self.logger.info(f"Report date: {report_date}")
             params = base_params.copy()
+            params['sortColumns'] = 'REPORT_DATE'
             params['filter'] = f"(REPORT_DATE='{report_date}')"
-            # setup adjustment params
             start_url = os.getenv('ADJ_URL') + urlencode(params, quote_via=quote)
             self.logger.info(f"Start url: {start_url}")
             yield scrapy.Request(start_url, callback=self.parse, 
-                                 meta={'params': params},
+                                 meta={'params': params, 'report_date': report_date},
                                  errback=self.errback_httpbin,
                                  dont_filter=True)
         
@@ -145,8 +108,8 @@ class Adjustment(BaseSpider):
             yield content
             return
             
-        self.logger.info(f"Adjustment content: {content}")
-        result = content['result']
+        self.logger.debug(f"Adjustment content: {content}")
+        result = content.get('result') if content else None
         if not result or not result.get('data'):
             self.logger.info(f"No dividend data found for date (filter: {meta['params'].get('filter', 'N/A')})")
             if result:
@@ -167,11 +130,11 @@ class Adjustment(BaseSpider):
             adjustment.add_value('report_date', obj['REPORT_DATE'])
             adjustment.add_value('register_date', obj['EQUITY_RECORD_DATE'])
             adjustment.add_value('ex_date', obj['EX_DIVIDEND_DATE'])
-            adjustment.add_value('bonus_share', obj['BONUS_RATIO']) # 送股
-            adjustment.add_value('transfer', obj['IT_RATIO']) # 转股
-            adjustment.add_value('bonus', obj['PRETAX_BONUS_RMB']) # /10
+            adjustment.add_value('bonus_share', obj['BONUS_RATIO'] if obj.get('BONUS_RATIO') is not None else 0) # 送股
+            adjustment.add_value('transfer', obj['IT_RATIO'] if obj.get('IT_RATIO') is not None else 0) # 转股
+            adjustment.add_value('bonus', obj['PRETAX_BONUS_RMB'] if obj.get('PRETAX_BONUS_RMB') is not None else 0) # /10
             item = adjustment.load_item()
-            self.logger.info(f"Yielding Adjustment item: {item}")
+            self.logger.debug(f"Yielding Adjustment item: {item}")
             yield item
 
         # check pagenumber
@@ -183,7 +146,8 @@ class Adjustment(BaseSpider):
             self.logger.info(f"Loading page {next_params['pageNumber']}/{total_pages} for {meta['params'].get('filter', 'N/A')}")
             yield scrapy.Request(next_url, 
                                  callback=self.parse, 
-                                 meta={'params': next_params}, 
+                                 meta={'params': next_params, 'report_date': report_date}, 
+                                 errback=self.errback_httpbin,
                                  dont_filter=True)
         else:
             self.logger.info(f"Completed all {total_pages} pages for {meta['params'].get('filter', 'N/A')}")

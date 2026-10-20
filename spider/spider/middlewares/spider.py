@@ -22,36 +22,6 @@ class HttpError(IgnoreRequest):
         super().__init__(*args, **kwargs)
 
 
-class SpiderSpiderMiddleware:
-    @classmethod
-    def from_crawler(cls, crawler):
-        s = cls()
-        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
-        return s
-
-    def process_spider_input(self, response, spider):
-        return None
-
-    async def process_spider_output(self, response, result, spider):
-        # result async generator
-        if isinstance(result, collections.AsyncIterable):
-            async for r in result:
-                yield r
-        else:
-            for r in result:
-                yield r
-
-    def process_spider_exception(self, response, exception, spider):
-        return None
-
-    def process_start_requests(self, start_requests, spider):
-        for r in start_requests:
-            yield r
-
-    def spider_opened(self, spider):
-        spider.logger.info('Spider opened: %s' % spider.name)
-
-
 class ErrorSpiderMiddleware:
     """record status not abandon item/request"""
 

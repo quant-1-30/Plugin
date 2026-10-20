@@ -59,6 +59,20 @@ OUT_LOG="${SPIDER_LOG_DIR}/spider.out.log"
 ERR_LOG="${SPIDER_LOG_DIR}/spider.error.log"
 touch "${OUT_LOG}" "${ERR_LOG}"
 
+# ---- 3.1 交易日历/周末与节假日检查（可通过 FORCE_RUN=1 跳过）----------
+if [ "${FORCE_RUN:-0}" != "1" ]; then
+    TODAY_DOW="$(date '+%u')"
+    TODAY_YMD="$(date '+%Y%m%d')"
+    if [ "${TODAY_DOW}" -gt 5 ]; then
+        echo "[INFO] $(date '+%F %T') 非交易日（周末 ${TODAY_YMD}），跳过执行（设置 FORCE_RUN=1 可强制运行）" | tee -a "${OUT_LOG}"
+        exit 0
+    fi
+    if [ -n "${CN_HOLIDAYS:-}" ] && [[ ",${CN_HOLIDAYS}," == *",${TODAY_YMD},"* ]]; then
+        echo "[INFO] $(date '+%F %T') 非交易日（节假日 ${TODAY_YMD}），跳过执行（设置 FORCE_RUN=1 可强制运行）" | tee -a "${OUT_LOG}"
+        exit 0
+    fi
+fi
+
 # ---- 4. 检查 Poetry（缺失则报错退出，不自动联网安装）-------------------
 if ! command -v poetry >/dev/null 2>&1; then
     echo "[FATAL] $(date '+%F %T') Poetry 未安装，PATH=${PATH}" | tee -a "${ERR_LOG}" >&2

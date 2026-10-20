@@ -3,6 +3,7 @@
 
 import os
 import asyncio
+import logging
 from twisted.internet import defer
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -10,6 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from contextlib import asynccontextmanager
 
 __all__ = ["async_ops", "_get_reactor_loop"]
+
+logger = logging.getLogger(__name__)
 
 
 def _get_reactor_loop():
@@ -36,8 +39,6 @@ class AsyncOps(object):
     通过 SQLAlchemy AsyncEngine + AsyncSession 操作 PostgreSQL，
     并将协程桥接到 Twisted Deferred 以便 Scrapy 使用。
     """
-
-    params = ()
 
     def __init__(self):
         self._initialized = False
@@ -105,24 +106,6 @@ class AsyncOps(object):
         finally:
             await session.close()
 
-    @staticmethod
-    def filter_valid_keys(base_obj, insert):
-        valid_keys = [column.name for column in base_obj.__table__.columns]
-        return {key: value for key, value in insert.items() if key in valid_keys}
-
-    async def reset_sequence(self, table_name):
-        """重置表的自增序列"""
-        async with self.get_db() as session:
-            async with session.begin():
-                result = await session.execute(
-                    text(f"SELECT pg_get_serial_sequence('{table_name}', 'id')")
-                )
-                sequence_name = result.scalar()
-                if sequence_name:
-                    await session.execute(
-                        text(f"ALTER SEQUENCE {sequence_name} RESTART WITH 1")
-                    )
-
     @defer.inlineCallbacks
     def on_query(self, query: str):
         """将异步查询提交到 reactor 事件循环，并桥接为 Twisted Deferred。"""
@@ -132,9 +115,17 @@ class AsyncOps(object):
             results = yield defer.Deferred.fromFuture(future)
             defer.returnValue(results)
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).error(f"on_query error: {e}", exc_info=True)
-            defer.returnValue([])
+            logger.error(f"on_query error: {e}", exc_info=True)
+            raise
+
+    def query_latest_ex_dates(self, table_name: str, callback, errback=None):
+        """查询指定表中每个 sid 的全部 (sid, ex_date) 记录用于增量水位与乱序补录去重。"""
+        sql = f"SELECT sid, ex_date FROM {table_name};"
+        deferred = self.on_query(sql)
+        deferred.addCallback(callback)
+        if errback is not None:
+            deferred.addErrback(errback)
+        return deferred
 
     async def _async_query(self, query: str):
         async with self.get_db() as session:
@@ -142,34 +133,32 @@ class AsyncOps(object):
                 query_obj = text(query)
             else:
                 query_obj = query
-            stream = await session.stream(query_obj)
-            results = []
-            async for row in stream:
-                results.append(row)
-            return results
-
-    async def on_insert(self, sql: str, param: dict):
-        """插入单条记录。session.begin() 上下文会自动提交，无需手动 commit。"""
-        async with self.get_db() as session:
-            async with session.begin():
-                await session.execute(sql, param)
+            result = await session.execute(query_obj)
+            return result.all()
 
     async def on_insert_many(self, table: str, rows: list):
-        """批量插入。rows 为 dict 列表，使用 executemany 语义。"""
+        """批量插入（幂等冲突忽略）。若整批失败则自动降级为单行插入以隔离坏数据。"""
         if not rows:
             return
         cols = list(rows[0].keys())
         columns = ", ".join(cols)
         values = ", ".join([f":{k}" for k in cols])
-        sql = text(f"INSERT INTO {table} ({columns}) VALUES ({values})")
-        async with self.get_db() as session:
-            async with session.begin():
-                await session.execute(sql, rows)
-
-    async def on_execute(self, query: str):
-        async with self.get_db() as session:
-            async with session.begin():
-                await session.execute(query)
+        sql = text(f"INSERT INTO {table} ({columns}) VALUES ({values}) ON CONFLICT DO NOTHING")
+        try:
+            async with self.get_db() as session:
+                async with session.begin():
+                    await session.execute(sql, rows)
+        except Exception as batch_err:
+            logger.warning(
+                f"Batch insert into {table} failed ({batch_err}), falling back to per-row insert for {len(rows)} rows."
+            )
+            for row in rows:
+                try:
+                    async with self.get_db() as session:
+                        async with session.begin():
+                            await session.execute(sql, row)
+                except Exception as row_err:
+                    logger.error(f"Row insert into {table} failed for {row}: {row_err}")
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """退出上下文时不吞噬异常，仅做清理。"""

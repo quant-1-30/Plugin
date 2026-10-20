@@ -13,7 +13,6 @@ Created on Tue Mar 12 15:37:47 2019
 
 # useful for handling different item types with a single interface
 import os
-import re
 import json
 import asyncio
 import numpy as np
@@ -24,15 +23,18 @@ import pyarrow.dataset as ds
 from pathlib import Path
 from toolz import valmap
 from scrapy import signals
-# Deferred  to aviod block main thread
 from twisted.internet.defer import Deferred
 from collections import namedtuple
-from sqlalchemy import text
 from datetime import datetime
 from scrapy.exceptions import DropItem  
 from spider.encoder import CustomFeedJsonEncoder
 
-from utils.tools import coerce_to_uint32
+from utils.tools import (
+    is_valid_ashare_sid,
+    encode_sid,
+    parse_datetime_to_int,
+    parse_trading_date_int,
+)
 from utils.operator import async_ops, _get_reactor_loop
 from spider.constant import index_mapping
 
@@ -52,22 +54,63 @@ class Pipeline:
     def from_crawler(cls, crawler):
         instance = cls()
         instance.logger = crawler.spider.logger
-        crawler.signals.connect(instance.open_spider, signal=signals.spider_opened)
-        crawler.signals.connect(instance.close_spider, signal=signals.spider_closed)
         return instance
-
-    def open_spider(self, spider):
-        # Initialize resources or connections
-        pass
 
     # core method
     def process_item(self, item, spider):
         # itemloader add_value to return list object
-        pass
+        raise NotImplementedError
 
-    def close_spider(self, spider):
-        # Clean up resources or connections
-        pass
+
+class CorporateActionPipeline(Pipeline):
+    """分红送转与配股公共清洗基类，负责日期格式化、A股代码校验、数据库水位对比及当次运行去重。"""
+
+    def __init__(self):
+        self.seen_keys = set()
+
+    def _clean_corporate_action_item(
+        self,
+        item,
+        watermark_map: dict,
+        default_fields: tuple,
+        dedup_field: str = "ex_date",
+        known_keys: set = None,
+    ):
+        item = valmap(lambda x: x[0], item)
+        if not item.get("ex_date") or not item.get("report_date"):
+            self.logger.debug(f"Missing ex_date or report_date in item: {item}")
+            return None
+
+        if not is_valid_ashare_sid(item.get("sid", "")):
+            return None
+
+        item["sid"] = encode_sid(item["sid"])
+        item["ex_date"] = parse_datetime_to_int(item["ex_date"])
+        item["report_date"] = parse_datetime_to_int(item["report_date"])
+        item["register_date"] = parse_datetime_to_int(item.get("register_date"))
+
+        for field in default_fields:
+            item.setdefault(field, 0)
+
+        dedup_key = (item["sid"], item[dedup_field])
+        if dedup_key in self.seen_keys:
+            return None
+
+        ex_pair = (item["sid"], item["ex_date"])
+        if known_keys:
+            # 当数据库已预加载 (sid, ex_date) 集合时，支持晚公告/改期的历史分红补录
+            if ex_pair in known_keys:
+                return None
+            self.seen_keys.add(dedup_key)
+            known_keys.add(ex_pair)
+            return item
+
+        latest_ex_date = watermark_map.get(item["sid"], 0)
+        self.logger.debug(f"Cleaned item: {item}, watermark: {latest_ex_date}")
+        if item["ex_date"] > latest_ex_date:
+            self.seen_keys.add(dedup_key)
+            return item
+        return None
 
 
 class Asset(Pipeline):
@@ -76,72 +119,56 @@ class Asset(Pipeline):
         item = valmap(lambda x: x[0], item)
         item.setdefault("delist", 0)
 
+        if not is_valid_ashare_sid(item.get("sid", "")):
+            raise DropItem("Empty Asset")
+
+        trading_date = parse_trading_date_int(item.get("first_trading"))
+        if trading_date <= 0:
+            raise DropItem("Empty Asset")
+
+        item["first_trading"] = trading_date
         max_date = spider.asset_latest_date
-        if int(item["first_trading"]) > max_date:
+        if item["first_trading"] > max_date:
             item["sid"] = item["sid"].encode("utf-8")
             item["name"] = item["name"].encode("utf-8")
 
             self.logger.info(f"Found Asset item: {item}")
             return item
-        # return {}
         raise DropItem("Empty Asset")
     
 
-class Adjustment(Pipeline):
+class Adjustment(CorporateActionPipeline):
     """
        xpath of sina adjustment
     """
 
     def process_item(self, item, spider):
-        item = valmap(lambda x: x[0], item)
-        if "ex_date" not in item:
-            # not implemented
-            self.logger.info(f"Found No Ex_date Adjustment item: {item}")
-            # return {} # feeds dict object
-            raise DropItem("Empty Adjustment")
-    
-        m_group = re.match(r'^[630]\d{5}(?:)', item["sid"]) # ?: 非捕获组 只匹配
-        if m_group and m_group.group():
-            # item["sid"] = item["sid"].split('.')[0]
-            item["sid"] = item["sid"].split('.')[0].encode("utf-8")
-            item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
-            item['report_date'] = int(datetime.strptime(item['report_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
-            
-            register_date = item.get("register_date", 0)
-            item['register_date'] = int(datetime.strptime(register_date, '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d')) if register_date else 0
-
-            updt = spider.adj_ex_date.get(item["sid"], 0)
-            self.logger.info(f"Found Adjustment item: {item} and {updt}")
-            if item["ex_date"] > updt:
-                return item
-        # return {}
+        cleaned = self._clean_corporate_action_item(
+            item,
+            watermark_map=spider.adj_ex_date,
+            default_fields=("bonus_share", "transfer", "bonus"),
+            dedup_field="ex_date",
+            known_keys=getattr(spider, "adj_known_keys", None),
+        )
+        if cleaned is not None:
+            return cleaned
         raise DropItem("Empty Adjustment")
     
 
-class Rightment(Pipeline):
+class Rightment(CorporateActionPipeline):
     """
         align item in order to construct frame finally
     """
     def process_item(self, item, spider):
-        item = valmap(lambda x: x[0], item)
-        if "ex_date" not in item:
-            self.logger.info(f"Found No Ex_date Rightment item: {item}")
-            # return {} 
-            raise DropItem("Empty Rightment")
-
-        # item["sid"] = item["sid"].split('.')[0]
-        item["sid"] = item["sid"].split('.')[0].encode("utf-8")
-        item['report_date'] = int(datetime.strptime(item['report_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
-        item['ex_date'] = int(datetime.strptime(item['ex_date'], '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d'))
-        
-        register_date = item.get("register_date", 0)
-        item['register_date'] = int(datetime.strptime(register_date, '%Y-%m-%d %H:%M:%S').strftime('%Y%m%d')) if register_date else 0
-        
-        updt = spider.rgt_ex_date.get(item["sid"], 0)
-        self.logger.info(f"Found Rightment item: {item} and {updt}")
-        if item["ex_date"] > updt:
-            return item
-        # return {}
+        cleaned = self._clean_corporate_action_item(
+            item,
+            watermark_map=spider.rgt_ex_date,
+            default_fields=("ratio", "price"),
+            dedup_field="report_date",
+            known_keys=getattr(spider, "rgt_known_keys", None),
+        )
+        if cleaned is not None:
+            return cleaned
         raise DropItem("Empty Rightment")
 
 
@@ -152,7 +179,7 @@ class AsyncDb(Pipeline):
     @classmethod
     def from_crawler(cls, crawler):
         instance = cls(
-            batch_size=crawler.settings.getint('POSTGRES_BATCH_SIZE', 1),
+            batch_size=crawler.settings.getint('POSTGRES_BATCH_SIZE', 100),
             max_retry=crawler.settings.getint('POSTGRES_RETRY', 3)
         )
         instance.logger = crawler.spider.logger
@@ -163,7 +190,7 @@ class AsyncDb(Pipeline):
         instance._loop = cls._loop
         return instance
 
-    def __init__(self, batch_size=10, flush_interval=10, max_retry=3):
+    def __init__(self, batch_size=100, flush_interval=10, max_retry=3):
         self.batch_size = batch_size
         self.max_retry = max_retry
         self.flush_interval = flush_interval
@@ -177,71 +204,97 @@ class AsyncDb(Pipeline):
     def open_spider(self, spider):
         self.queue = asyncio.Queue()
         self._worker_task = asyncio.run_coroutine_threadsafe(self._consume_loop(spider), self._loop)
-        self.logger.info(f"AsyncDb for {spider.name} started with new event loop")
+        self.logger.info(f"AsyncDb for {spider.name} started with event loop (batch_size={self.batch_size})")
 
     def process_item(self, item, spider):
-        self.logger.info(f"Processing AsyncDb item: {item}")
+        self.logger.debug(f"Processing AsyncDb item: {item}")
         if item:
-            self.queue.put_nowait(namedData(spider.table_name, item)) # nonblock put or raise queue.Full
+            self.queue.put_nowait(namedData(spider.table_name, dict(item))) # nonblock put or raise queue.Full
         return item
 
     async def _flush_batch(self, batches, ops):
+        grouped = {}
         for batch in batches:
-            table = batch.table_name
-            item = batch.item
-            columns = ', '.join(item.keys())
-            values = ', '.join([f':{k}' for k in item.keys()])
-            sql = text(f"INSERT INTO {table} ({columns}) VALUES ({values})")
-            await ops.on_insert(sql, item)
+            grouped.setdefault(batch.table_name, []).append(batch.item)
+        for table, rows in grouped.items():
+            await ops.on_insert_many(table, rows)
 
     async def force_flush(self):
-        async with async_ops as ops:
-            if self.buffer:
-                await self._flush_batch(self.buffer, ops)
-                self.buffer.clear()
+        if not self.buffer:
+            return
+        batches_to_flush = list(self.buffer)
+        last_err = None
+        for attempt in range(1, self.max_retry + 1):
+            try:
+                async with async_ops as ops:
+                    await self._flush_batch(batches_to_flush, ops)
+                del self.buffer[:len(batches_to_flush)]
+                return
+            except Exception as e:
+                last_err = e
+                self.logger.warning(
+                    f"[AsyncDb] flush attempt {attempt}/{self.max_retry} failed: {e}"
+                )
+                if attempt < self.max_retry:
+                    await asyncio.sleep(min(2 ** attempt, 5))
+        # 重试耗尽后清理当前坏批次并记录错误，避免阻塞后续批次消费
+        del self.buffer[:len(batches_to_flush)]
+        self.logger.error(
+            f"[AsyncDb] Dropped {len(batches_to_flush)} items after {self.max_retry} failed flush attempts: {last_err}",
+            exc_info=True,
+        )
 
     async def _consume_loop(self, spider):
-        try:
-            while True:
-                try:
-                    data = await asyncio.wait_for(self.queue.get(), timeout=self.flush_interval)
-                    if data is self._stop_signal:
-                        print("Received stop signal, exiting consume loop")
-                        break
+        while True:
+            try:
+                data = await asyncio.wait_for(self.queue.get(), timeout=self.flush_interval)
+                if data is self._stop_signal:
+                    self.logger.info("Received stop signal, exiting consume loop")
+                    break
 
-                    self.buffer.append(data)
+                self.buffer.append(data)
 
-                    # 满 batch 大小就 flush
-                    if len(self.buffer) >= self.batch_size:
-                        await self.force_flush()
-
-                except asyncio.TimeoutError:
+                # 满 batch 大小就 flush
+                if len(self.buffer) >= self.batch_size:
                     await self.force_flush()
 
-            await self.force_flush()
+            except asyncio.TimeoutError:
+                try:
+                    await self.force_flush()
+                except Exception as e:
+                    self.logger.error(f"[AsyncDb] Periodic flush error: {e}", exc_info=True)
+            except Exception as e:
+                self.logger.error(f"[AsyncDb] Consume iteration error: {e}", exc_info=True)
 
+        try:
+            await self.force_flush()
         except Exception as e:
-            self.logger.error(f"[AsyncDb] Background consume loop failed: {e}", exc_info=True)
+            self.logger.error(f"[AsyncDb] Final consume flush error: {e}", exc_info=True)
 
     def close_spider(self, spider):
-        print("Closing AsyncDb spider...")
+        self.logger.info("Closing AsyncDb spider...")
 
         async def _close():
             try:
-                if hasattr(self, '_worker_task') and not self._worker_task.done():
+                if hasattr(self, '_worker_task') and self._worker_task is not None and not self._worker_task.done():
                     await self.queue.put(self._stop_signal)
                     try:
                         await asyncio.wait_for(
                             asyncio.wrap_future(self._worker_task), 
-                            timeout=10.0
+                            timeout=30.0
                         )
                     except asyncio.TimeoutError:
-                        self.logger.warning("Cancel Worker")
+                        self.logger.warning("Cancel Worker after 30s timeout")
                         self._worker_task.cancel()
-                
+
+                while self.queue and not self.queue.empty():
+                    item = self.queue.get_nowait()
+                    if item is not self._stop_signal:
+                        self.buffer.append(item)
+
                 await self.force_flush()
             except Exception as e:
-                self.logger.error(f"Error during close: {e}")
+                self.logger.error(f"Error during close: {e}", exc_info=True)
         
         close_future = asyncio.run_coroutine_threadsafe(_close(), self._loop)
         return Deferred.fromFuture(close_future)
@@ -261,7 +314,7 @@ class JsonlFeed(Pipeline):
             pass
 
     def process_item(self, item, spider):
-        line = json.dumps(dict(item), indent=4, cls=CustomFeedJsonEncoder, ensure_ascii=False) + "\n"
+        line = json.dumps(dict(item), cls=CustomFeedJsonEncoder, ensure_ascii=False) + "\n"
         self.file.write(line)
         return item
 
@@ -274,7 +327,7 @@ class ParquetWriter(Pipeline):
 
     @classmethod
     def from_crawler(cls, crawler):
-        instance =cls(
+        instance = cls(
             dataset_root=crawler.settings.get("dataset_root", "data/benchmark")
         )
         instance.logger = crawler.spider.logger
@@ -303,21 +356,20 @@ class ParquetWriter(Pipeline):
         self.buffer = [] 
 
     def _prepare_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        df["datetime"] = pd.to_datetime(df["tick"]).dt.tz_localize("Asia/Shanghai")
+        df = df.drop_duplicates(subset=["sid", "tick"], keep="last").copy()
+        shanghai_dt = pd.to_datetime(df["tick"]).dt.tz_localize("Asia/Shanghai")
+        utc_dt = shanghai_dt.dt.tz_convert("UTC")
  
         df["sid"] = df["sid"].str.replace(r'^[a-zA-Z]+\.|\.[a-zA-Z]+$', '', regex=True)
         df["sid"] = df["sid"].map(index_mapping).fillna(df["sid"])
 
-        # datetime64[ns, UTC] pandas extensionType --- pd.api.types.is_datetime64_any_dtype ---> int64
-        # nosemanic Parquet tick is int64 with Tableau, PowerBI , 1718637195 not 2026-06-17 15:13:15` /pd.to_datetime(df['tick'], unit='s')`
-        df["tick"] = (df["datetime"].dt.tz_convert("UTC").astype("int64") // 10**9).astype("int64") 
-        # # tick 'datetime64[ns, UTC]' ---> 'datetime64[ns]' which is recgonized by pa.from_numpy_dtype 
-        # df["tick"] = df["datetime"].dt.tz_convert("UTC").dt.tz_localize(None)
+        # 显式使用秒精度转换，避免不同 pandas 版本 datetime 底层精度(ns/us)差异导致数值错误
+        df["tick"] = utc_dt.dt.as_unit("s").astype("int64")
         
-        df["year"] = df["datetime"].dt.year.astype(str)
-        df["quarter"] = df["datetime"].apply(lambda x: f'Q{((x.month - 1) // 3) + 1}')
-        df["date"] = df["datetime"].dt.strftime("%Y%m")
-        df["datetime"] = df["datetime"].dt.tz_convert("UTC").dt.tz_localize(None) # same with rpc_feed node
+        df["year"] = shanghai_dt.dt.year.astype(str)
+        df["quarter"] = "Q" + shanghai_dt.dt.quarter.astype(str)
+        df["date"] = shanghai_dt.dt.strftime("%Y%m")
+        df["datetime"] = utc_dt.dt.tz_localize(None).dt.as_unit("ms") # same with rpc_feed node
         
         numeric_cols = ['open', 'close', 'high', 'low', 'volume', 'amount']
         for col in numeric_cols:
@@ -338,23 +390,52 @@ class ParquetWriter(Pipeline):
         return pa.schema(data_fields + partition_fields), pa.schema(partition_fields)
 
     def _write_to_parquet(self, df: pd.DataFrame, spider_name: str) -> bool:
-        """PyArrow write_dataset group by sid """
+        """PyArrow write_dataset group by sid，支持同日增量合并与按日期文件覆盖"""
         try:
             schema, partition_schema = self._make_schema(df)
-            table = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
-
-            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            basename_template = f"daily_{spider_name}_{now_str}_{{i}}.parquet"
-
-            ds.write_dataset(
-                data=table,
-                base_dir=self.dataset_root,
-                format="parquet",
-                partitioning=ds.partitioning(partition_schema, flavor="hive"),
-                basename_template=basename_template,
-                existing_data_behavior="overwrite_or_ignore"
+            trade_dates = (
+                df["datetime"]
+                .dt.tz_localize("UTC")
+                .dt.tz_convert("Asia/Shanghai")
+                .dt.strftime("%Y%m%d")
             )
+            for trade_date_str, group_df in df.groupby(trade_dates, sort=False):
+                basename_template = f"daily_{spider_name}_{trade_date_str}_{{i}}.parquet"
+                merged_df = self._merge_existing_daily_parquet(group_df, spider_name, trade_date_str)
+                table = pa.Table.from_pandas(merged_df, schema=schema, preserve_index=False)
+
+                ds.write_dataset(
+                    data=table,
+                    base_dir=self.dataset_root,
+                    format="parquet",
+                    partitioning=ds.partitioning(partition_schema, flavor="hive"),
+                    basename_template=basename_template,
+                    existing_data_behavior="overwrite_or_ignore"
+                )
         except Exception as e:
             self.logger.error(f"PyArrow Write Error: {e}", exc_info=True)
             raise
+
+    def _merge_existing_daily_parquet(self, df: pd.DataFrame, spider_name: str, trade_date_str: str) -> pd.DataFrame:
+        """若目标分区下已存在当日 Parquet 文件，则读取并按 (sid, tick) 增量合并去重。"""
+        root_path = Path(self.dataset_root)
+        frames = []
+        for (year, quarter, sid, date_ym), _ in df.groupby(self.partition_cols, sort=False):
+            part_dir = root_path / f"year={year}" / f"quarter={quarter}" / f"sid={sid}" / f"date={date_ym}"
+            if part_dir.exists():
+                for pq_file in part_dir.glob(f"daily_{spider_name}_{trade_date_str}_*.parquet"):
+                    try:
+                        old_df = pd.read_parquet(pq_file)
+                        old_df["datetime"] = pd.to_datetime(old_df["datetime"]).dt.tz_localize(None).dt.as_unit("ms")
+                        old_df["year"] = str(year)
+                        old_df["quarter"] = str(quarter)
+                        old_df["sid"] = str(sid)
+                        old_df["date"] = str(date_ym)
+                        frames.append(old_df[df.columns])
+                    except Exception as e:
+                        self.logger.warning(f"Failed to read existing parquet {pq_file}: {e}")
+        if not frames:
+            return df
+        combined = pd.concat(frames + [df], ignore_index=True)
+        return combined.drop_duplicates(subset=["sid", "tick"], keep="last").sort_values("tick").reset_index(drop=True)
 

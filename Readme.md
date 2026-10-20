@@ -169,36 +169,36 @@ run.py (CrawlerRunner, 串行 Deferred 链)
 | 项 | 说明 |
 |----|------|
 | 增量水位 | `SELECT max(first_trading) FROM asset` |
-| 数据源参数 | `fs=m:0+f:8,m:1+f:8`（沪市正常 + 深市正常），`fid=f26` 按 IPO 日期排序 |
+| 数据源参数 | `fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23`（沪深主板/创业板/科创板全量沪深 A 股），`fid=f26` 按 IPO 日期倒序，`pz=100` |
 | 字段映射 | `f12→sid`, `f14→name`, `f26→first_trading` |
-| 分页 | `pn` 递增直到无 diff |
+| 分页 | `pn` 递增，当整页记录均 `<= 水位` 或无 diff 时提前终止 |
 | 清洗规则 | `first_trading > max_date` 才入库；sid/name 编码为 bytes |
 
 ### 5.2 Adjustment（`adj.py`）
 
 | 项 | 说明 |
 |----|------|
-| 增量水位 | 窗口函数取每个 sid 的最新 `ex_date` |
-| 起始日期 | `get_adjacent_quarter` 取水位后退一年，再枚举季度 |
-| 数据源 | `reportName=RPT_SHAREBONUS_DET`，按 `REPORT_DATE` 过滤 |
+| 增量水位 | 预加载数据库中已有 `(sid, ex_date)` 集合及各 `sid` 最新 `ex_date` |
+| 起始日期 | 增量模式按 `EX_DIVIDEND_DATE >= 水位季度末` 服务端过滤；空表引导按 `REPORT_DATE` 枚举季度 |
+| 数据源 | `reportName=RPT_SHAREBONUS_DET`，`pageSize=500` |
 | 字段映射 | `SECUCODE→sid`, `REPORT_DATE→report_date`, `EQUITY_RECORD_DATE→register_date`, `EX_DIVIDEND_DATE→ex_date`, `BONUS_RATIO→bonus_share`, `IT_RATIO→transfer`, `PRETAX_BONUS_RMB→bonus` |
 | 分页 | `pageNumber` 递增直到 `pages` |
-| 清洗规则 | 仅匹配 `^[630]\d{5}` 的 sid（主板/创业板），日期转 `YYYYMMDD` int |
+| 清洗规则 | 校验全量沪深 A 股代码前缀（沪深主板/创业板/科创板，与 `asset` 表外键一致），日期转 `YYYYMMDD` int，支持乱序历史补录去重 |
 
 ### 5.3 Rightment（`rgt.py`）
 
 | 项 | 说明 |
 |----|------|
-| 增量水位 | 同 Adjustment，取每个 sid 最新 `ex_date` |
-| 数据源 | `reportName=RPT_IPO_ALLOTMENT`，按 `EQUITY_RECORD_DATE` 排序 |
+| 增量水位 | 同 Adjustment，预加载 `(sid, ex_date)` 集合及各 `sid` 最新 `ex_date` |
+| 数据源 | `reportName=RPT_IPO_ALLOTMENT`，按 `EQUITY_RECORD_DATE` 倒序并携带服务端增量 `filter`，`pageSize=500` |
 | 字段映射 | `SECUCODE→sid`, `FIRST_NOTICE_DATE→report_date`, `EQUITY_RECORD_DATE→register_date`, `EX_DIVIDEND_DATE→ex_date`, `PLACING_RATIO→ratio`, `ISSUE_PRICE→price` |
-| 清洗规则 | 日期转 `YYYYMMDD` int；`ex_date > 水位` 才入库 |
+| 清洗规则 | 日期转 `YYYYMMDD` int；支持 `(sid, report_date)` 去重与增量早停 |
 
 ### 5.4 Benchmark（`benchmark.py`）
 
 | 项 | 说明 |
 |----|------|
-| 数据源 | `push2his.eastmoney.com` 的 `trends2` 接口，`ndays=1`（当日分钟线） |
+| 数据源 | `push2his.eastmoney.com` 的 `trends2` 接口，`ndays=5`（近 5 个交易日分钟线，支持断跑自愈） |
 | 指数列表 | 来自 `.env` 的 `INDEX`（如 `1.000001`） |
 | 字段映射 | `code→sid`，`trends` 字符串 split → tick/open/close/high/low/volume/amount |
 | 落地 | 不入库，直接进 `ParquetWriter` 写 Hive 分区 Parquet |
@@ -224,12 +224,12 @@ run.py (CrawlerRunner, 串行 Deferred 链)
 
 - `open_spider`：创建 `asyncio.Queue`，启动后台 `_consume_loop` 消费者
 - `process_item`：`put_nowait` 入队（非阻塞），item 继续向后传
-- `_consume_loop`：按 `batch_size`（默认 **1**，由 `POSTGRES_BATCH_SIZE` 控制）攒批 → `force_flush` → SQLAlchemy ` executemany`
-- `close_spider`：发送 `_stop_signal` → join worker → 最后一次 `force_flush`，返回 `Deferred` 确保关闭前写完
+- `_consume_loop`：按 `batch_size`（默认 **100**，由 `POSTGRES_BATCH_SIZE` 控制）攒批 → `force_flush`（含 `max_retry` 退避重试）→ SQLAlchemy `executemany`（`ON CONFLICT DO NOTHING` + 单行降级隔离）
+- `close_spider`：发送 `_stop_signal` → join worker → 排空残留队列并执行最终 `force_flush`，返回 `Deferred` 确保关闭前写完
 
 ### 6.4 `JsonlFeed`
 
-每个 item 写一行 JSON（`indent=4`，`CustomFeedJsonEncoder` 处理 bytes/numpy/date）。文件名 `feeds/jsonl/{name}_{timestamp}.jsonl`。
+每个 item 单行写入一行 JSON（`CustomFeedJsonEncoder` 处理 bytes/numpy/date）。文件名 `feeds/jsonl/{name}_{timestamp}.jsonl`。
 
 ### 6.5 `ParquetWriter`（Benchmark 专用）
 

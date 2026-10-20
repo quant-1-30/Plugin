@@ -14,10 +14,14 @@ Created on Tue Mar 12 15:37:47 2019
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 BOT_NAME = 'backtest'
 
 # Obey robots.txt rules
-ROBOTSTXT_OBEY = False
 ROBOTSTXT_OBEY = False
 
 # 添加异步支持
@@ -37,22 +41,15 @@ USER_AGENT = ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1
 # Override the default request headers:
 DEFAULT_REQUEST_HEADERS = {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Encoding': 'gzip, deflate',
+          'Accept-Encoding': 'gzip',
           'Accept-Language': 'zh-CN,zh;q=0.9, en',
           'Connection': 'keep-alive'}
 
-# proxy
-USER_PROXY_IP = ['http://mylh05w9:mylh05w9@49.67.73.93:2018',
-            'http://mylh05w8:mylh05w8@218.93.9.13:2021',
-            'http://mylh05w7:mylh05w7@180.97.244.253:2018',
-            'http://mylh05w6:mylh05w6@36.150.45.208:2018',
-            'http://mylh05w5:mylh05w5@221.229.107.77:2018',
-            'http://mylh05w4:mylh05w4@117.62.237.178:2729',
-            'http://mylh05w3:mylh05w3@121.229.44.134:8225',
-            'http://mylh05w2:mylh05w2@101.89.216.66:110',
-            'http://mylh05w1:mylh05w1@60.190.234.153:2018']
+# proxy (read from .env to avoid hardcoding sensitive credentials)
+_proxy_env = os.getenv('USER_PROXY_IP', '')
+USER_PROXY_IP = [p.strip() for p in _proxy_env.split(',') if p.strip()]
 
-HTTPPROXY_ENABLED = True
+HTTPPROXY_ENABLED = bool(USER_PROXY_IP)
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
@@ -100,7 +97,7 @@ DOWNLOADER_MIDDLEWARES = {
 
 # httperror
 HTTPERROR_ALLOW_ALL = False
-HTTPERROR_ALLOWED_CODES = [301, 302]
+HTTPERROR_ALLOWED_CODES = []
 
 # Enable or disable spider middlewares
 SPIDER_MIDDLEWARES = {
@@ -109,24 +106,23 @@ SPIDER_MIDDLEWARES = {
     'scrapy.spidermiddlewares.referer.RefererMiddleware': None,
     'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware': None,
     'scrapy.spidermiddlewares.depth.DepthMiddleware': None,
+    'spider.middlewares.HttpErrorMiddleware': 50,
     'spider.middlewares.ErrorSpiderMiddleware': 500,
 }
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
 EXTENSIONS = {
+   'scrapy.extensions.corestats.CoreStats': None,
    'scrapy.extensions.logstats.LogStats': None,
-   'spider.extensions.StatsMailer': None,
+   'spider.extensions.StatsMailer': 100,
    'spider.extensions.CoreStats': 0,
 }
 
-# Configure item pipelines
-# https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-ITEM_PIPELINES = {
-   #  'spider.pipelines.BasicsPipeline': 300,
-   #  'spider.pipelines.AlignPipeline': 400,
-    # 'spider.pipelines.AsyncDb': 500,
-}
+POSTGRES_BATCH_SIZE = int(os.getenv('POSTGRES_BATCH_SIZE', 100))
+
+# Configure item pipelines (overridden per spider in custom_settings)
+ITEM_PIPELINES = {}
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
@@ -148,63 +144,13 @@ CONCURRENT_REQUESTS_PER_DOMAIN = 16
 # None zero CONCURRENT_REQUESTS_PER_DOMAIN is ignored
 CONCURRENT_REQUESTS_PER_IP = 16
 
-# Enable and configure HTTP caching (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
-# HTTPCACHE_ENABLED = True
-# HTTPCACHE_EXPIRATION_SECS = 0
-# HTTPCACHE_DIR = 'httpcache'
-# HTTPCACHE_IGNORE_HTTP_CODES = []
-# HTTPCACHE_STORAGE = 'scrapy.extensions.httpcache.FilesystemCacheStorage'
-
-# set log
-# LOG_FILE = 'logs/{s}.log'.format(s=datetime.datetime.now().strftime('%Y%m%d_%H:%M:%S'))
 LOG_LEVEL = 'INFO'
 
-# mail
-MAIL_HOST = 'smtp.163.com'
-MAIL_FROM = '13776668123@163.com'
-MAIL_USER = '13776668123@163.com'
-MAIL_PASS = 'ICFHBPNBTZTKWLUO'
-MAIL_PORT = 465
-MAIL_SSL = True
-# MAIL_PORT = 25
-# MAIL_SSL = False
-STATSMAILER_RCPTS = ['13776668123@163.com']
-
-# SPIDER_MIDDLEWARES_BASE = {
-#     'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware': 50,
-#     'scrapy.spidermiddlewares.offsite.OffsiteMiddleware': 500,
-#     'scrapy.spidermiddlewares.referer.RefererMiddleware': 700,
-#     'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware': 800,
-#     'scrapy.spidermiddlewares.depth.DepthMiddleware': 900,
-# }
-
-# # Enable or disable spider middlewares default
-# DOWNLOADER_MIDDLEWARES_BASE = {
-#     'scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware': 100,
-#     'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware': None,
-#     'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware': None,
-#     'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware': None,
-#     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
-#     'scrapy.downloadermiddlewares.retry.RetryMiddleware': None,
-#     'scrapy.downloadermiddlewares.ajaxcrawl.AjaxCrawlMiddleware': None,
-#     'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware': None,
-#     'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware': None,
-#     'scrapy.downloadermiddlewares.redirect.RedirectMiddleware': None,
-#     'scrapy.downloadermiddlewares.cookies.CookiesMiddleware': None,
-#     'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware': None,
-#     'scrapy.downloadermiddlewares.stats.DownloaderStats': None,
-#     'scrapy.downloadermiddlewares.httpcache.HttpCacheMiddleware': None,
-# }
-
-# EXTENSIONS_BASE = {
-#     'scrapy.extensions.corestats.CoreStats': 0,
-#     'scrapy.extensions.telnet.TelnetConsole': 0,
-#     'scrapy.extensions.memusage.MemoryUsage': 0,
-#     'scrapy.extensions.memdebug.MemoryDebugger': 0,
-#     'scrapy.extensions.closespider.CloseSpider': 0,
-#     'scrapy.extensions.feedexport.FeedExporter': 0,
-#     'scrapy.extensions.logstats.LogStats': 0,
-#     'scrapy.extensions.spiderstate.SpiderState': 0,
-#     'scrapy.extensions.throttle.AutoThrottle': 0,
-# }
+# mail (MAIL_PASS 由 StatsMailer 直接从环境变量读取，避免在 Scrapy Overridden settings 日志中明文打印)
+MAIL_HOST = os.getenv('MAIL_HOST', 'smtp.163.com')
+MAIL_FROM = os.getenv('MAIL_FROM', '')
+MAIL_USER = os.getenv('MAIL_USER', '')
+MAIL_PORT = int(os.getenv('MAIL_PORT', 465))
+MAIL_SSL = bool(int(os.getenv('MAIL_SSL', 1)))
+_rcpts_env = os.getenv('STATSMAILER_RCPTS', '')
+STATSMAILER_RCPTS = [r.strip() for r in _rcpts_env.split(',') if r.strip()]

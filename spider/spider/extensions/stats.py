@@ -6,6 +6,7 @@ Created on Tue Mar 12 15:37:47 2019
 @author: python
 """
 
+import os
 import logging
 import datetime
 from scrapy import signals
@@ -37,9 +38,9 @@ class CoreStats:
 
     def spider_closed(self, spider, reason):
         finish_time = datetime.datetime.now()
-        elapsed_time = finish_time - self.start_time
-        elapsed_time_seconds = elapsed_time.total_seconds()
-        self.stats.set_value('elapsed_time_seconds', elapsed_time_seconds, spider=spider)
+        if self.start_time is not None:
+            elapsed_time = finish_time - self.start_time
+            self.stats.set_value('elapsed_time_seconds', elapsed_time.total_seconds(), spider=spider)
         self.stats.set_value('finish_time', finish_time, spider=spider)
         self.stats.set_value('finish_reason', reason, spider=spider)
 
@@ -64,9 +65,17 @@ class StatsMailer:
     @classmethod
     def from_crawler(cls, crawler):
         recipients = crawler.settings.getlist("STATSMAILER_RCPTS")
-        if not recipients:
+        mail_pass = os.getenv("MAIL_PASS") or crawler.settings.get("MAIL_PASS")
+        if not recipients or not mail_pass:
             raise NotConfigured
-        mail = MailSender.from_settings(crawler.settings)
+        mail = MailSender(
+            smtphost=crawler.settings.get("MAIL_HOST", "smtp.163.com"),
+            mailfrom=crawler.settings.get("MAIL_FROM", ""),
+            smtpuser=crawler.settings.get("MAIL_USER", ""),
+            smtppass=mail_pass,
+            smtpport=crawler.settings.getint("MAIL_PORT", 465),
+            smtpssl=crawler.settings.getbool("MAIL_SSL", True),
+        )
         o = cls(crawler.stats, recipients, mail)
         crawler.signals.connect(o.spider_closed, signal=signals.spider_closed)
         return o
@@ -77,4 +86,11 @@ class StatsMailer:
         body += "\n".join(f"{k:<50} : {v}" for k, v in self.stats.get_stats().items())
         body += f"\n\n{spider.name} stats\n\n"
         body += "\n".join(f"{k:<50} : {v}" for k, v in spider_stats.items())
-        return self.mail.send(self.recipients, f"Scrapy stats for: {spider.name}", body)
+        d = self.mail.send(self.recipients, f"Scrapy stats for: {spider.name}", body)
+        if d is not None:
+            d.addErrback(
+                lambda failure: logger.warning(
+                    f"StatsMailer failed to send mail for {spider.name}: {failure.type.__name__}"
+                )
+            )
+        return d

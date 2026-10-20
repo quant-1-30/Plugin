@@ -7,10 +7,45 @@ Created on Tue Mar 12 15:37:47 2019
 """
 import json
 import gzip
+from datetime import datetime
 
+import scrapy
 from scrapy.spiders import Spider
-from scrapy.exceptions import IgnoreRequest
+from scrapy.exceptions import IgnoreRequest, CloseSpider
 from utils.tools import get_retry_request
+from utils.operator import async_ops
+
+COMMON_THROTTLE_SETTINGS = {
+    "AUTOTHROTTLE_ENABLED": True,
+    "AUTOTHROTTLE_START_DELAY": 1,
+    "AUTOTHROTTLE_MAX_DELAY": 5,
+    "AUTOTHROTTLE_TARGET_CONCURRENCY": 4,
+    "CONCURRENT_REQUESTS": 4,
+    "DOWNLOAD_TIMEOUT": 15,
+}
+
+
+def build_spider_settings(log_prefix: str, item_pipelines: dict, extra: dict = None) -> dict:
+    """构建各爬虫统一 custom_settings，消除中间件与日志配置重复。"""
+    settings = {
+        **COMMON_THROTTLE_SETTINGS,
+        "DOWNLOADER_MIDDLEWARES": {
+            "spider.middlewares.UserAgentMiddleware": 200,
+            "spider.middlewares.CustomRetryMiddleware": 300,
+        },
+        "ITEM_PIPELINES": item_pipelines,
+        "LOG_LEVEL": "INFO",
+        "LOG_FORMAT": "%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        "LOG_DATEFORMAT": "%Y-%m-%d %H:%M:%S",
+        "LOG_FILE": f"logs/{log_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log",
+        "LOG_ENABLED": True,
+        "LOG_STDOUT": True,
+        "LOG_SHORT_NAMES": True,
+        "LOGSTATS_INTERVAL": 60,
+    }
+    if extra:
+        settings.update(extra)
+    return settings
 
 
 class BaseSpider(Spider):
@@ -18,24 +53,45 @@ class BaseSpider(Spider):
     allowed_domains = [
         'push2.eastmoney.com', 
         'push2his.eastmoney.com',
-        'example.com',  # Example of an additional domain
+        'push2delay.eastmoney.com',
+        'datacenter-web.eastmoney.com',
+        'finance.sina.com.cn',
     ]
     custom_settings = {
-        'CONCURRENT_REQUESTS': 16,  # Example setting: number of concurrent requests
+        **COMMON_THROTTLE_SETTINGS,
     }
-    
-    @classmethod
-    def from_crawler(cls, crawler, *args, **kwargs):
-        spider = super(BaseSpider, cls).from_crawler(crawler, *args, **kwargs)
-        
-        # routers = crawler.settings.getdict('META_URLS', {})  
-        
-        # if not routers:
-        #     spider.logger.warning(f"META_URLS not found in settings, using defaults")
-        
-        # spider.routers = routers
-        # spider.logger.debug(f"Routers configured: {routers}")
-        return spider
+
+    async def start(self):
+        """Scrapy 2.13+ 异步入口，委托给 start_requests() 以消除弃用警告并保持向后兼容。"""
+        for request in self.start_requests():
+            yield request
+
+    def on_watermark_error(self, failure):
+        """数据库水位查询失败回调：标记失败并通知引擎以 watermark_unavailable 原因关闭爬虫。"""
+        self._watermark_failed = True
+        self.logger.critical(f"[{self.name}] Failed to load watermark from database: {failure.value}")
+        if hasattr(self, "crawler") and getattr(self.crawler, "engine", None) is not None:
+            self.crawler.engine.close_spider(self, "watermark_unavailable")
+
+    def _check_watermark_ready(self):
+        """在发起请求前校验水位是否加载成功，若失败则通知引擎关闭并拒绝产生请求。"""
+        if getattr(self, "_watermark_failed", False):
+            if hasattr(self, "crawler") and getattr(self.crawler, "engine", None) is not None:
+                self.crawler.engine.close_spider(self, "watermark_unavailable")
+            raise CloseSpider("watermark_unavailable")
+
+    @staticmethod
+    def _build_ex_date_watermarks(result):
+        """将数据库 (sid, ex_date) 查询结果聚合为 (最大除权日字典, 已知记录集合)。"""
+        ex_map = {}
+        known = set()
+        if result:
+            for sid, ex_date in result:
+                if ex_date is not None:
+                    known.add((sid, ex_date))
+                    if ex_date > ex_map.get(sid, 0):
+                        ex_map[sid] = ex_date
+        return ex_map, known
     
     def _extract_json_with_retry(self, response):
         # parse failure also need to retry --- return request

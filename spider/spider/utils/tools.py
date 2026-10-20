@@ -7,19 +7,40 @@ Created on Tue Mar 12 15:37:47 2019
 """
 from datetime import datetime
 from logging import Logger
+import re
 from typing import Optional, Union, Dict
 
 from scrapy.http.request import Request
 from scrapy.spiders import Spider
 from scrapy.utils.python import global_object_name
 
+ASHARE_SID_PATTERN = re.compile(
+    r'^(?:60[0135]|68[89]|00[0123]|30[012])\d{3}(?:\.(?:SH|SZ))?$'
+)
 
-def coerce_to_uint32(a, scaling_factor):
-    """
-    Returns a copy of the array as uint32, applying a scaling factor to
-    maintain precision if supplied.
-    """
-    return (a * scaling_factor).round().astype('uint32')
+
+def is_valid_ashare_sid(sid: str) -> bool:
+    """校验是否为有效的沪深 A 股证券代码（含沪深主板、创业板、科创板，与 asset 表外键一致）。"""
+    return bool(sid and ASHARE_SID_PATTERN.match(sid))
+
+
+def encode_sid(sid: str) -> bytes:
+    """去除证券代码交易所后缀并编码为 UTF-8 bytes。"""
+    return sid.split('.')[0].encode('utf-8')
+
+
+def parse_datetime_to_int(date_str: Optional[str], fmt: str = '%Y-%m-%d %H:%M:%S') -> int:
+    """将日期时间字符串转换为 YYYYMMDD 整型，空值返回 0。"""
+    if not date_str:
+        return 0
+    return int(datetime.strptime(date_str, fmt).strftime('%Y%m%d'))
+
+
+def parse_trading_date_int(value: Optional[Union[str, int]]) -> int:
+    """将首发上市日期转换为 YYYYMMDD 整型，非数字或空值返回 0。"""
+    if value is not None and str(value).isdigit():
+        return int(value)
+    return 0
 
 
 def quarter_date(sdate, fmt="%Y-%m-%d"):
@@ -51,33 +72,32 @@ def quarter_date(sdate, fmt="%Y-%m-%d"):
     return dates
 
 
-def get_adjacent_quarter(adj_ex_date: Dict[str, int], offset: int=1):
-        """
-            03-31 / 06-30 / 09-30 / 12-31
-        """
-        if not adj_ex_date:
-            return '1990-01-01'
+def get_adjacent_quarter(adj_ex_date: Dict[str, int], offset: int = 1) -> str:
+    """
+        03-31 / 06-30 / 09-30 / 12-31
+        根据最新除权日回退 offset 年（4 * offset 个季度），返回起始季度末日期。
+    """
+    if not adj_ex_date:
+        return '1990-01-01'
 
-        max_ex_date = max(adj_ex_date.values())
+    try:
+        max_date = datetime.strptime(str(max(adj_ex_date.values())), '%Y%m%d')
         try:
-            max_date = datetime.strptime(str(max_ex_date), '%Y%m%d')
             near_date = max_date.replace(year=max_date.year - offset)
-        except Exception as e:
-            return '1990-01-01'
-
+        except ValueError:
+            near_date = max_date.replace(year=max_date.year - offset, day=28)
         year = near_date.year
-        if near_date >= datetime(year, 12, 31):
-            start_date_obj = datetime(year, 12, 31)
-        elif near_date >= datetime(year, 9, 30):
-            start_date_obj = datetime(year, 9, 30)
-        elif near_date >= datetime(year, 6, 30):
-            start_date_obj = datetime(year, 6, 30)
-        elif near_date >= datetime(year, 3, 31):
-            start_date_obj = datetime(year, 3, 31)
-        else:
-            start_date_obj = datetime(year - 1, 12, 31)
-
+        quarter_ends = [
+            datetime(year - 1, 12, 31),
+            datetime(year, 3, 31),
+            datetime(year, 6, 30),
+            datetime(year, 9, 30),
+            datetime(year, 12, 31),
+        ]
+        start_date_obj = max(q for q in quarter_ends if q <= near_date)
         return start_date_obj.strftime('%Y-%m-%d')
+    except Exception:
+        return '1990-01-01'
 
 
 def get_retry_request(
@@ -146,7 +166,6 @@ def get_retry_request(
         new_request = request.copy()
         new_request.dont_filter = True
         new_request.meta['retry_times'] = retry_times
-        new_request.meta['retry_delay'] = 2 ** retry_times  # exponential backoff
 
         if priority_adjust is None:
             priority_adjust = settings.getint('RETRY_PRIORITY_ADJUST')

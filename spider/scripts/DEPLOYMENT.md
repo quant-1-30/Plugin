@@ -14,7 +14,7 @@
 | Poetry | 已安装并能 `poetry run python spider/run.py` |
 | 依赖 | `cd spider && poetry install --no-root` 已执行 |
 | `.env` | `spider/.env` 已配置（PGENGINE/PGUSER/PGPWD/PGHOST/PGPORT/PGDB/INDEX 等） |
-| 数据库 | PostgreSQL 可连通 |
+| 数据库 | PostgreSQL 可连通（注：首次部署空表时，`adjustment` 会从 1990 年按季度引导全量历史，耗时较长属正常现象；后续每日运行自动切换为按 `EX_DIVIDEND_DATE` 服务端增量过滤） |
 | 运行时间 | 默认 **周一到周五 16:30**（A 股 15:00 收盘后留 30 分钟余量） |
 
 ### 定位 Poetry 安装位置（关键）

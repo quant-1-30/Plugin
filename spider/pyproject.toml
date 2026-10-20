@@ -1,12 +1,12 @@
 [tool.poetry]
 name = "spider"
-version = "0.1.0"
+version = "0.2.0"
 description = ""
 authors = ["hengxin.liu"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.13"  # 限定python version 避免 pkg 不兼容
+python = ">=3.11,<3.13"  
 asyncpg = "^0.30.0"
 sqlalchemy = "^2.0.41"
 greenlet = "^3.2.2"

@@ -137,16 +137,16 @@ poetry run scrapy crawl benchmark
 
 - 在 `custom_settings` 中启用 `UserAgentMiddleware` 与 `CustomRetryMiddleware`。
 - 通过 `ITEM_PIPELINES` 挂载对应的业务 Pipeline + `AsyncDb` + `JsonlFeed`（benchmark 使用 `ParquetWriter`）。
--  asset/adj/rgt 在 `spider_opened` 信号中通过 `async_ops.on_query()` 查询数据库获取最新日期，用于增量过滤。
+- `asset` 在 `spider_opened` 信号中通过 `async_ops.on_query()` 查询数据库最大首发交易日水位；`adj` / `rgt` 通过 `async_ops.query_latest_ex_dates()` 预加载数据库中已有的 `(sid, ex_date)` 对账集合（`known_keys`）及各 `sid` 最大除权日，兼顾增量过滤与乱序历史公告补录。
 
 ### 5.2 Item 与 Pipeline（`spider/pipelines/`）
 
 - `items.py`：定义 `AssetItem`、`TickItem`、`Dividend`、`Right`。
 - `pipelines.py`：
-  - `Asset` / `Adjustment` / `Rightment`：清洗字段、过滤已存在数据、统一日期格式。
-  - `AsyncDb`：后台 asyncio 消费者，将 item 批量写入 PostgreSQL（默认 `batch_size=1`，通过 `POSTGRES_BATCH_SIZE` 设置）。
-  - `JsonlFeed`：把 item 写入 `feeds/jsonl/{name}_{timestamp}.jsonl`。
-  - `ParquetWriter`：将 benchmark tick 按 `year/quarter/sid/date` Hive 分区写入 `data/benchmark`。
+  - `Asset` / `Adjustment` / `Rightment`（继承 `CorporateActionPipeline`）：清洗字段、过滤已存在数据、统一日期格式并支持乱序历史补录去重。
+  - `AsyncDb`：后台 asyncio 消费者，将 item 批量写入 PostgreSQL（默认 `batch_size=100`，通过 `POSTGRES_BATCH_SIZE` 设置，使用 `ON CONFLICT DO NOTHING` + 单行降级重试）。
+  - `JsonlFeed`：把 item 单行写入 `feeds/jsonl/{name}_{timestamp}.jsonl`。
+  - `ParquetWriter`：将 benchmark tick 按 `year/quarter/sid/date` Hive 分区写入 `data/benchmark`（支持同日增量合并去重）。
 
 ### 5.3 中间件（`spider/middlewares/`）
 
@@ -154,20 +154,19 @@ poetry run scrapy crawl benchmark
   - `UserAgentMiddleware`：从 `USER_AGENT` 列表随机选择 UA。
   - `CustomRetryMiddleware`：自定义重试逻辑。
   - `HttpProxyMiddleware`：代理支持（当前未在活跃爬虫中启用）。
-  - `RedirectMiddleware`：处理 301/302。
 - `spider.py`：
   - `ErrorSpiderMiddleware`：拦截错误状态码。
   - `HttpErrorMiddleware`：非 200 响应过滤。
 
 ### 5.4 扩展（`spider/extensions/`）
 
-- `CoreStats`：记录启动/结束时间、item 数、响应数、drop 原因统计。
-- `StatsMailer`：爬虫关闭后通过 163 SMTP 发送统计邮件（依赖 `settings.py` 中的 `MAIL_*` 配置）。
+- `CoreStats`：记录启动/结束时间、item 数、响应数、drop 原因统计（内置 `scrapy.extensions.corestats.CoreStats` 已禁用以避免双计数）。
+- `StatsMailer`：默认启用（优先级 `100`），爬虫关闭后通过 163 SMTP 发送统计邮件（`MAIL_PASS` 直接从环境变量读取，避免打入 Scrapy 启动日志）。
 
 ### 5.5 工具（`spider/utils/`）
 
-- `operator.py`：`AsyncOps` 单例，封装 SQLAlchemy 异步引擎与会话，提供 `on_query`、`on_insert`、`on_execute`。
-- `tools.py`：季度日期生成、相邻季度计算、重试请求构造、`coerce_to_uint32`。
+- `operator.py`：`AsyncOps` 单例，封装 SQLAlchemy 异步引擎与会话，提供 `on_query`、`query_latest_ex_dates`、`on_insert_many`。
+- `tools.py`：A 股代码前缀校验、季度日期生成、相邻季度计算、重试请求构造、`coerce_to_uint32`。
 
 ### 5.6 配置常量
 
@@ -190,11 +189,12 @@ poetry run scrapy crawl benchmark
 
 `.env` 文件由 `run.py` 通过 `dotenv.load_dotenv()` 加载，包含数据库连接、目标 URL、指数列表等敏感信息。由于该文件被 `.gitignore` 忽略，新环境需要手动创建。代码中读取到的关键变量包括：
 
-- `PGENGINE`、`PGUSER`、`PGPWD`、`PGHOST`、`PGPORT`、`PGDB`、`PGPOOLSIZE`、`PGTIMEOUT`、`PGMAXOVERFLOW`、`PGPOOLRECYCLE`、`PGPREPING`、`PGECHO`
+- `PGENGINE`、`PGUSER`、`PGPWD`、`PGHOST`、`PGPORT`、`PGDB`、`PGPOOLSIZE`、`PGTIMEOUT`、`PGMAXOVERFLOW`、`PGPOOLRECYCLE`、`PGPREPING`、`PGECHO`、`POSTGRES_BATCH_SIZE`
 - `ASSET_URL`、`ADJ_URL`、`RGT_URL`、`INDEX_URL`
 - `INDEX`
+- `MAIL_HOST`、`MAIL_FROM`、`MAIL_USER`、`MAIL_PASS`、`MAIL_PORT`、`MAIL_SSL`、`STATSMAILER_RCPTS`、`USER_PROXY_IP`
 
-> 请勿在代码中硬编码数据库密码或邮件密码；当前 `settings.py` 中仍保留有代理账号与邮件授权码等明文，应逐步迁移至 `.env` 或密钥管理工具。
+> 请勿在代码中硬编码数据库密码或邮件密码；代理账号与邮件授权码均已迁移至 `.env`，其中 `MAIL_PASS` 由 `StatsMailer` 直接从环境变量读取以避免出现在 Scrapy Overridden settings 日志中。
 
 ---
 
@@ -202,9 +202,9 @@ poetry run scrapy crawl benchmark
 
 1. `run.py` 安装 `AsyncioSelectorReactor` 并调用 `load_dotenv()`。
 2. 使用 `CrawlerRunner(get_project_settings())` 创建 runner。
-3. `crawl()` 函数通过 `defer.inlineCallbacks` 串行调度四个爬虫。
-4. 每个爬虫在 `spider_opened` 中异步查询 PostgreSQL 获取最新数据点，用于增量过滤。
-5. `start_requests` 生成初始请求，`parse` 为 `async def`，解析 JSON 后产出 Item。
+3. `crawl()` 函数通过 `defer.inlineCallbacks` 串行调度四个爬虫（单爬虫独立捕获异常，互不阻断）。
+4. 每个爬虫在 `spider_opened` 中异步查询 PostgreSQL 获取最新水位或 `(sid, ex_date)` 已知集合（`known_keys`），用于增量过滤与乱序补录对账；若水位查询失败则调用 `engine.close_spider(spider, 'watermark_unavailable')` 拒绝启动。
+5. `start()` / `start_requests()` 生成初始请求，`parse` 为 `async def`，解析 JSON 后产出 Item。
 6. Item 经过业务 Pipeline 清洗，再进入：
    - `AsyncDb`：写入 PostgreSQL。
    - `JsonlFeed`：写入本地 JSONL。
@@ -228,19 +228,19 @@ poetry run scrapy crawl benchmark
 
 ## 9. 测试说明
 
-- 项目存在 `spider/tests/` 目录，但当前为空。
-- 没有配置 `pytest`、`tox` 或 CI 流水线。
-- 建议后续补充：
-  - 各爬虫 `parse` 回调的单元测试（使用 `scrapy.http.TextResponse` 固定样本）。
-  - Pipeline 清洗逻辑测试。
-  - `AsyncDb` 的 mock 测试。
+- 单元测试位于 `spider/tests/test_spider_and_pipelines.py`，覆盖：
+  - 四个爬虫 `parse` 回调及增量早停逻辑测试（使用 `scrapy.http.TextResponse` 固定样本）。
+  - `Asset` / `Adjustment` / `Rightment` Pipeline 清洗、A 股代码前缀校验、乱序分红去重测试。
+  - `ParquetWriter` 写入与同日增量合并测试。
+  - `AsyncDb` 批量刷盘与冲突处理 mock 测试。
+- 运行命令：`cd spider && PYTHONPATH=spider poetry run python -m unittest discover -s tests -v`。
 
 ---
 
 ## 10. 部署与运维
 
-- 当前主要部署方式是直接运行 `spider/scripts/run.sh`。
-- 脚本注释中提及 `supervisorctl` 与 macOS `launchctl plist`，但未提供具体配置文件。
+- 当前主要部署方式是直接运行 `spider/scripts/run.sh`（详见 `spider/scripts/DEPLOYMENT.md`）。
+- 仓库提供 `spider/scripts/com.plugin.spider.plist`（macOS launchd）与 `spider/scripts/spider.cron`（Linux cron）配置模板。
 - benchmark 输出存放在 `spider/data/benchmark`，按 Hive 风格分区：`year=YYYY/quarter=Q{1-4}/sid=<sid>/date=YYYYMM/`。
 - JSONL feed 输出存放在 `spider/feeds/jsonl/`。
 - 日志输出存放在 `spider/logs/`。
@@ -249,7 +249,7 @@ poetry run scrapy crawl benchmark
 
 ## 11. 安全注意事项
 
-- **敏感信息硬编码**：`spider/settings.py` 中直接写入了代理 IP 列表（含用户名密码）以及邮件 SMTP 授权码。这些属于敏感凭证，应尽快迁移到 `.env` 文件或专用密钥管理服务，并通过 `crawler.settings.get(...)` 读取。
+- **敏感信息管理**：代理 IP 列表（`USER_PROXY_IP`）以及邮件 SMTP 授权码（`MAIL_PASS`）均已迁移到 `.env` 文件并通过环境变量读取，严禁在 `settings.py` 中硬编码明文凭证。
 - **`.env` 文件**：已加入 `.gitignore`，不会进入版本控制。在新增环境或 CI 中需要手动注入对应变量。
 - **数据库连接**：`spider/utils/operator.py` 通过环境变量拼接 PostgreSQL URL，请确保 `.env` 中的 `PGPWD` 强度足够且网络访问受限。
 - **Robots 与法律合规**：项目设置 `ROBOTSTXT_OBEY = False`，且采集的是第三方金融数据。修改或扩展爬虫时请遵守目标网站的 `robots.txt`、服务条款及当地数据合规要求。
@@ -260,6 +260,7 @@ poetry run scrapy crawl benchmark
 ## 12. 常见问题速查
 
 - **Reactor 相关报错**：`run.py` 已经在任何 Twisted 导入前调用 `asyncioreactor.install()`，不要再次安装或手动创建事件循环。
-- **数据库写入没有反应**：检查 `.env` 是否正确加载，`AsyncDb` 默认 `batch_size=1`，可以调大 `POSTGRES_BATCH_SIZE` 提升吞吐。
-- **增量过滤失效**：asset/adj/rgt 依赖 `spider_opened` 中查询数据库的最新日期，请确认 PostgreSQL 中对应表有数据且字段名正确。
+- **数据库写入没有反应**：检查 `.env` 是否正确加载，`AsyncDb` 默认 `batch_size=100`，可通过 `POSTGRES_BATCH_SIZE` 调整。
+- **增量过滤失效**：asset/adj/rgt 依赖 `spider_opened` 中查询数据库的最新水位；若数据库查询失败，爬虫会触发 `CloseSpider('watermark_unavailable')` 拒绝启动以防止全量重抓。
+- **退市状态字段说明**：`Asset` Pipeline 当前对新入库证券设置 `delist=0`，尚不包含存量退市证券的状态翻转逻辑。
 - **benchmark 输出为空**：`Benchmark` 只写入 `data/benchmark`，不写入数据库或 JSONL；检查 `INDEX` 环境变量是否配置正确。
